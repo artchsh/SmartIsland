@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentHeight
@@ -49,6 +51,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.agupta07505.smartisland.model.IslandMode
 import com.agupta07505.smartisland.model.IslandNotification
+import com.agupta07505.smartisland.ui.MAX_EXPANDED_HEIGHT_DP
+import com.agupta07505.smartisland.ui.MIN_EXPANDED_HEIGHT_DP
 import com.agupta07505.smartisland.data.SmartIslandSettings
 import com.agupta07505.smartisland.data.LaunchableApp
 import androidx.core.graphics.drawable.toBitmap
@@ -218,16 +222,23 @@ fun IslandExpandedContent(
             ) { page ->
                 val notification = notifications.getOrNull(page)
                 if (notification != null) {
+                    val pageScroll = rememberScrollState()
+                    // Natural height of this page's content, measured on an inner
+                    // element that is NOT height-constrained.
+                    //
+                    // The outer Box is capped to the HIG's 84-160dp range and made
+                    // scrollable; the inner Box measures the content at its natural
+                    // size so the measurement is not corrupted by the cap. Measuring
+                    // on the outer element instead would feed the capped viewport
+                    // height back into the measurement and create a layout loop.
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .wrapContentHeight()
-                            .onSizeChanged { size ->
-                                val heightDp = with(density) { size.height.toDp() }
-                                if (pageHeights[notification.key] != heightDp) {
-                                    pageHeights = pageHeights.toMutableMap().apply { put(notification.key, heightDp) }
-                                }
-                            }
+                            .height(targetHeight.coerceIn(
+                                MIN_EXPANDED_HEIGHT_DP.dp,
+                                MAX_EXPANDED_HEIGHT_DP.dp
+                            ))
+                            .verticalScroll(pageScroll)
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null
@@ -235,13 +246,26 @@ fun IslandExpandedContent(
                                 onOpenNotification(notification)
                             }
                     ) {
-                        if (settings.enableNotificationBackdrop && notification.mode != IslandMode.Music) {
-                            NotificationBackdrop(
-                                notification = notification,
-                                settings = settings,
-                                modifier = Modifier.matchParentSize()
-                            )
-                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .wrapContentHeight()
+                                .onSizeChanged { size ->
+                                    val heightDp = with(density) { size.height.toDp() }
+                                    if (pageHeights[notification.key] != heightDp) {
+                                        pageHeights = pageHeights.toMutableMap().apply {
+                                            put(notification.key, heightDp)
+                                        }
+                                    }
+                                }
+                        ) {
+                            if (settings.enableNotificationBackdrop && notification.mode != IslandMode.Music) {
+                                NotificationBackdrop(
+                                    notification = notification,
+                                    settings = settings,
+                                    modifier = Modifier.matchParentSize()
+                                )
+                            }
 
                         when (notification.mode) {
                             IslandMode.Notification -> NotificationExpanded(
@@ -334,6 +358,7 @@ fun IslandExpandedContent(
                                 apps = launcherApps,
                                 onLaunchApp = onLaunchApp
                             )
+                            }
                         }
                     }
                 }

@@ -11,7 +11,9 @@ import com.agupta07505.smartisland.data.SmartIslandCommand
 import com.agupta07505.smartisland.model.SwipeAction
 import com.agupta07505.smartisland.ui.expanded.IslandExpandedContent
 import com.agupta07505.smartisland.ui.expanded.trySendFirstAction
+import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDp
 import androidx.compose.animation.core.animateFloat
@@ -158,6 +160,26 @@ fun IslandOverlayView(
         easing = FastOutSlowInEasing
     )
 
+    // Cross-fade specs.
+    //
+    // Both layers previously faded on the same 190ms curve, so at the midpoint
+    // both sat at roughly 50% alpha and the swap looked muddy. That is a large
+    // part of why the expansion read as two surfaces replacing each other rather
+    // than one shape changing its content.
+    //
+    // The compact content now clears out early and faster than the expanded
+    // content arrives, which is how the iOS transition reads: the shape is
+    // already the card before the card's content is legible.
+    val compactExitSpec = tween<Float>(
+        durationMillis = 120,
+        easing = FastOutLinearInEasing
+    )
+    val expandedEntrySpec = tween<Float>(
+        durationMillis = 200,
+        delayMillis = 70,
+        easing = LinearOutSlowInEasing
+    )
+
     val activeNotification = notifications.getOrNull(safeIndex)
     val activeMode = activeNotification?.mode ?: IslandMode.Empty
 
@@ -248,14 +270,14 @@ fun IslandOverlayView(
     }
 
     val collapsedAlpha by transition.animateFloat(
-        transitionSpec = { alphaSpec },
+        transitionSpec = { compactExitSpec },
         label = "collapsedAlpha"
     ) {
         if (it || isHiding) 0f else 1f
     }
 
     val expandedAlpha by transition.animateFloat(
-        transitionSpec = { alphaSpec },
+        transitionSpec = { expandedEntrySpec },
         label = "expandedAlpha"
     ) {
         if (it) 1f else 0f
@@ -871,7 +893,12 @@ fun IslandOverlayView(
                 },
             contentAlignment = Alignment.TopCenter
         ) {
-            // Collapsed content layer (pinned to fixed pill bounds at top-center, cancelling yOffset)
+            // Compact content layer, pinned to the pill bounds at top-centre.
+            //
+            // It shrinks slightly as it fades, so the compact glyphs read as being
+            // absorbed into the shape as it grows rather than sitting on top of it
+            // and then blinking out. Combined with the staggered cross-fade specs,
+            // this is what makes the container feel like a single morphing object.
             if (collapsedAlpha > 0f) {
                 Box(
                     modifier = Modifier
@@ -880,6 +907,10 @@ fun IslandOverlayView(
                         .align(Alignment.TopCenter)
                         .graphicsLayer {
                             alpha = collapsedAlpha
+                            val absorb = COMPACT_ABSORB_MIN_SCALE +
+                                (1f - COMPACT_ABSORB_MIN_SCALE) * collapsedAlpha
+                            scaleX = absorb
+                            scaleY = absorb
                         }
                 ) {
                     IslandCollapsedContent(
@@ -913,10 +944,18 @@ fun IslandOverlayView(
                         onLaunchApp = onLaunchApp,
                         onCollapse = onToggleExpanded,
                         statusBarHeight = statusBarHeight.dp,
-                        // Each mode owns its natural height. The launcher already
-                        // supplies its own loading height and must not impose that
-                        // minimum on compact call or battery content.
-                        onHeightMeasured = { expandedHeight = it },
+                        // Each mode owns its natural height, then the card is clamped to
+                        // the HIG's 84-160dp range. Overflow stays reachable because
+                        // IslandExpandedContent makes the page content scrollable when
+                        // it exceeds the ceiling. The launcher already supplies its own
+                        // loading height and must not impose that minimum on compact
+                        // call or battery content.
+                        onHeightMeasured = {
+                            expandedHeight = it.coerceIn(
+                                MIN_EXPANDED_HEIGHT_DP.dp,
+                                MAX_EXPANDED_HEIGHT_DP.dp
+                            )
+                        },
                         settings = settings,
                         onReplyStateChanged = onReplyStateChanged
                     )
@@ -1175,6 +1214,22 @@ internal const val EXPANDED_CARD_MARGIN_DP = 12f
 
 /** Floor so the card stays usable on very narrow screens. */
 internal const val MIN_EXPANDED_WIDTH_DP = 260f
+
+/**
+ * Scale the compact content shrinks to as it is absorbed into the expanding
+ * shape. 1f is fully collapsed, 0.82f is fully absorbed.
+ */
+private const val COMPACT_ABSORB_MIN_SCALE = 0.82f
+
+/**
+ * HIG height range for the expanded presentation: 84-160pt.
+ *
+ * The ceiling is only safe because the page content becomes vertically
+ * scrollable when it exceeds it; otherwise clamping would make overflow content
+ * (long notification bodies, the inline reply field) unreachable.
+ */
+internal const val MIN_EXPANDED_HEIGHT_DP = 84f
+internal const val MAX_EXPANDED_HEIGHT_DP = 160f
 
 /**
  * Width of the expanded card.

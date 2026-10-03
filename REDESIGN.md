@@ -131,6 +131,26 @@ for step 2.
 - Invariants: the window is never larger than the drawn shape, so the pill is never
   clipped and pass-through never regresses
 
+**Status: partly done.** The *inset* half is complete — `calculateExpandedWidth`
+now subtracts a fixed margin instead of scaling by 95%, and
+`calculateExpandedTopOffset` returns that same margin, which removed the 30dp
+downward jump. The *window-bounds animation* half is not started: the window still
+jumps straight to `MATCH_PARENT` on expand. That is the remaining piece of the
+morph.
+
+### Phase B — one continuous shape
+- Single rounded-rect whose bounds and corner radius interpolate
+  pill → card; corner radius morphs from capsule to card radius
+- Compact content and expanded content cross-fade **inside** that one shape, with a
+  short stagger
+- Removes the second panel entirely
+
+**Status: mostly done.** The container already interpolated its bounds and corner
+radius; what made it read as two surfaces was that the top offset jumped, the
+companion bubbles drew on top, and both content layers faded on the same curve.
+All three are fixed. The compact content now also shrinks slightly as it fades, so
+it reads as being absorbed into the growing shape.
+
 ### Phase B — one continuous shape
 - Single rounded-rect whose bounds and corner radius interpolate
   pill → card; corner radius morphs from capsule to card radius
@@ -146,12 +166,27 @@ for step 2.
   (AUDIT §5.4)
 - Pointer cancellation handled
 
+**Status: done**, except that the two detectors have not been merged into one
+owner. The double-fire is fixed by an explicit hit test against the card rect,
+which is behaviourally equivalent and lower risk than a full rewrite, but the
+structure still has two gesture layers.
+
 ### Phase D — per-mode cards at iOS proportions
 - Re-fit all 13 expanded cards into 84–160 dp using the HIG region model
   (leading / trailing / centre / bottom)
 - Long message bodies scroll or truncate rather than growing the card
 - Consolidate the seven duplicated `IslandMode` dispatch blocks into one registry
   (AUDIT §5.10) as part of the rework
+
+**Status: partly done.** The card height is now clamped to the HIG's 84–160dp
+range, and page content is vertically scrollable so clamping cannot make overflow
+content (long notification bodies, the inline reply field) unreachable. Measuring
+natural height on an inner unconstrained element is what stops the clamp feeding a
+capped viewport height back into the measurement.
+
+The 13 cards themselves are not yet re-fitted. Most visibly, `BatteryExpanded`
+floods the whole card with a green gradient where iOS keeps the card black with
+green accents.
 
 ---
 
