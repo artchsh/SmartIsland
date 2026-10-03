@@ -21,6 +21,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -71,6 +72,8 @@ import com.agupta07505.smartisland.data.SmartIslandSettings
 import com.agupta07505.smartisland.di.SmartIslandRepositories
 import com.agupta07505.smartisland.model.IslandMode
 import com.agupta07505.smartisland.model.IslandNotification
+import com.agupta07505.smartisland.util.FALLBACK_DISPLAY_CORNER_RADIUS
+import com.agupta07505.smartisland.util.rememberDisplayCornerRadius
 import com.agupta07505.smartisland.data.LaunchableApp
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateDpAsState
@@ -143,18 +146,39 @@ fun IslandOverlayView(
     ).dp
     val transition = updateTransition(targetState = expanded, label = "islandTransition")
 
-    val sizeSpec = spring<androidx.compose.ui.unit.Dp>(
-        dampingRatio = 0.72f,
-        stiffness = 520f
-    )
-    val sizeSpecFloat = spring<Float>(
-        dampingRatio = 0.72f,
-        stiffness = 520f
-    )
-    val heightSpec = spring<androidx.compose.ui.unit.Dp>(
-        dampingRatio = 0.76f,
-        stiffness = 520f
-    )
+    // The display's own corner radius, so the island's curvature is continuous
+    // with the screen's. Null when the platform does not report one (API < 31 or
+    // an OEM that omits it), in which case the setting's manual radius is used.
+    val displayCornerRadius = rememberDisplayCornerRadius()
+
+    // The expanded card keeps a slightly tighter radius than the pill. iOS does
+    // the same: the compact pill is a near-capsule, the expanded card has visibly
+    // flatter corners because it is much wider. Derived from the display radius
+    // so it still tracks the device.
+    val expandedCardRadius = remember(displayCornerRadius) {
+        (displayCornerRadius ?: FALLBACK_DISPLAY_CORNER_RADIUS) * 0.78f
+    }
+
+    // Direction-aware motion specs.
+    //
+    // A single spring was previously used in both directions. Springs are
+    // symmetric, so the 0.72 damping ratio that gives a pleasant hint of
+    // overshoot on the way IN also produced a visible bounce on the way OUT,
+    // which reads as wrong: the Dynamic Island settles rather than rebounds when
+    // it collapses.
+    //
+    // Expanding keeps a small overshoot. Collapsing is critically damped
+    // (dampingRatio = 1f, no overshoot at all) and stiffer, so it also settles
+    // inside COLLAPSE_SETTLE_MS. That matters beyond feel: the overlay window
+    // stays MATCH_PARENT for COLLAPSE_SETTLE_MS after `expanded` flips, and only
+    // then shrinks to pill size. If the content animation outlasted the window,
+    // the content would be laid out against a shrinking window and jump.
+    val sizeExpandSpec = spring<Dp>(dampingRatio = 0.86f, stiffness = 520f)
+    val sizeCollapseSpec = spring<Dp>(dampingRatio = 1f, stiffness = 780f)
+    val heightExpandSpec = spring<Dp>(dampingRatio = 0.88f, stiffness = 520f)
+    val heightCollapseSpec = spring<Dp>(dampingRatio = 1f, stiffness = 780f)
+    val floatExpandSpec = spring<Float>(dampingRatio = 0.86f, stiffness = 520f)
+    val floatCollapseSpec = spring<Float>(dampingRatio = 1f, stiffness = 780f)
     val alphaSpec = tween<Float>(
         durationMillis = 190,
         easing = FastOutSlowInEasing
@@ -253,19 +277,45 @@ fun IslandOverlayView(
     val isHiding = isIdleHiding || (settings.autoHidePill && isAutoHidden)
     val pillBackgroundColor = Color(settings.pillColor)
 
-    val width by transition.animateDp(transitionSpec = { sizeSpec }, label = "islandWidth") {
+    // `targetState` inside a Transition.Segment is the state being transitioned
+    // TO, so it tells us the direction: true = expanding, false = collapsing.
+    val width by transition.animateDp(
+        transitionSpec = { if (targetState) sizeExpandSpec else sizeCollapseSpec },
+        label = "islandWidth"
+    ) {
         if (it) expandedWidth else if (isHiding) 0.dp else settings.width.dp
     }
-    val height by transition.animateDp(transitionSpec = { heightSpec }, label = "islandHeight") {
+    val height by transition.animateDp(
+        transitionSpec = { if (targetState) heightExpandSpec else heightCollapseSpec },
+        label = "islandHeight"
+    ) {
         if (it) expandedHeight else if (isHiding) 0.dp else settings.height.dp
     }
-    val yOffset by transition.animateDp(transitionSpec = { sizeSpec }, label = "islandYOffset") {
+    val yOffset by transition.animateDp(
+        transitionSpec = { if (targetState) sizeExpandSpec else sizeCollapseSpec },
+        label = "islandYOffset"
+    ) {
         if (it) expandedTopOffset else 0.dp
     }
-    val radius by transition.animateDp(transitionSpec = { sizeSpec }, label = "islandRadius") {
-        if (it) 34.dp else if (isHiding) 0.dp else settings.cornerRadius.dp
+    val radius by transition.animateDp(
+        transitionSpec = { if (targetState) sizeExpandSpec else sizeCollapseSpec },
+        label = "islandRadius"
+    ) {
+        when {
+            // Collapsed: follow the display's own corner radius so the island's
+            // curvature is continuous with the screen's, which is what the HIG
+            // means by "its rounded corner shape matches the camera". Falls back
+            // to the user's setting only if the platform reports nothing.
+            it -> expandedCardRadius
+            isHiding -> 0.dp
+            settings.matchDisplayCorners && displayCornerRadius != null -> displayCornerRadius
+            else -> settings.cornerRadius.dp
+        }
     }
-    val animatedXOffset by transition.animateDp(transitionSpec = { sizeSpec }, label = "islandXOffset") {
+    val animatedXOffset by transition.animateDp(
+        transitionSpec = { if (targetState) sizeExpandSpec else sizeCollapseSpec },
+        label = "islandXOffset"
+    ) {
         if (it) 0.dp else collapsedMainOffset
     }
 
@@ -284,14 +334,14 @@ fun IslandOverlayView(
     }
 
     val contentScale by transition.animateFloat(
-        transitionSpec = { sizeSpecFloat },
+        transitionSpec = { if (targetState) floatExpandSpec else floatCollapseSpec },
         label = "contentScale"
     ) {
         if (it) 1f else 0.95f
     }
 
     val contentSlideY by transition.animateDp(
-        transitionSpec = { sizeSpec },
+        transitionSpec = { if (targetState) sizeExpandSpec else sizeCollapseSpec },
         label = "contentSlideY"
     ) {
         if (it) 0.dp else (-6).dp
@@ -391,21 +441,24 @@ fun IslandOverlayView(
     } else {
         circleCenter - groupCenter
     }
-    val secondaryExpandedOffset = calculateSecondaryExpandedOffset(
-        secondaryIsPill = secondaryIsPill,
-        isCircleLeft = isCircleLeft,
-        isFullWidth = isFullWidth,
-        expandedCompactX = expandedCompactX.value,
-        screenCenter = screenCenter.value,
-        miniPillWidth = miniPillWidth.value,
-        circleSize = circleSize.value,
-        compactGap = compactGap.value
-    ).dp
-    val secondaryOffset by animateDpAsState(
-        targetValue = if (!expanded) collapsedSecondaryOffset else secondaryExpandedOffset,
-        animationSpec = spring(dampingRatio = 0.75f, stiffness = 520f),
-        label = "secondaryOffset"
-    )
+
+    // The companion bubble's offset is NOT animated.
+    //
+    // `collapsedBubbleAlpha` is `secondaryAlpha * (1 - expandedAlpha)`, so the
+    // bubble is only ever visible while collapsed. Animating its offset was
+    // therefore pure invisible work — except that it was the visible artefact:
+    //
+    // `calculateSecondaryExpandedOffset` returns a SCREEN-relative offset
+    // (measured from `screenCenter`, which comes from LocalConfiguration and is
+    // the full 445dp screen, not the window). While collapsed the window is only
+    // ~210dp wide, so a screen-relative offset places the bubble far outside the
+    // window. The old spring interpolated toward that value over ~350ms while the
+    // window itself was still shrinking, so the bubble visibly shot off to the
+    // right and then snapped back — the "teleport".
+    //
+    // Because the bubble is invisible when expanded, the expanded offset is never
+    // needed at all. Only the collapsed, window-relative offset is.
+    val secondaryOffset = collapsedSecondaryOffset
 
     // Outer Box: Fills the entire WindowManager window bounds (which are padded for easy touch)
     //
@@ -486,6 +539,16 @@ fun IslandOverlayView(
             RoundedCornerShape(safeRadius)
         }
 
+        // Diagnostic: one line per composition reporting what the platform says
+        // the display's corner radius is, so a mismatch between the island and
+        // the screen curvature can be diagnosed without guessing.
+        LaunchedEffect(displayCornerRadius) {
+            android.util.Log.d(
+                "SmartIslandOverlayView",
+                "display corner radius = ${displayCornerRadius} (fallback $FALLBACK_DISPLAY_CORNER_RADIUS)"
+            )
+        }
+
         // Inner Box: The actual visible pill container, managing the black background shape and size animations
         Box(
             modifier = Modifier
@@ -515,6 +578,11 @@ fun IslandOverlayView(
                 )
                 .clip(mainShape)
                 .background(pillBackgroundColor.copy(alpha = settings.opacity))
+                // Hairline outline. The Dynamic Island draws a subtle neutral
+                // border on both the collapsed pill and the expanded card; without
+                // it the shape dissolves into a black wallpaper. Sampled value,
+                // see ISLAND_BORDER_COLOR.
+                .border(ISLAND_BORDER_WIDTH, ISLAND_BORDER_COLOR, mainShape)
                 .pointerInput(displayMetrics.density, isInputActive) {
                     // coroutineScope gives the gesture loop a CoroutineScope whose job
                     // is a child of this pointerInput block, so the hold-detection job
@@ -1002,6 +1070,7 @@ fun IslandOverlayView(
                     )
                     .clip(RoundedCornerShape(secondaryBubbleCorner))
                     .background(pillBackgroundColor.copy(alpha = settings.opacity))
+                    .border(ISLAND_BORDER_WIDTH, ISLAND_BORDER_COLOR, RoundedCornerShape(secondaryBubbleCorner))
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
@@ -1048,8 +1117,13 @@ fun IslandOverlayView(
             Box(
                 modifier = Modifier
                     .absoluteOffset {
+                        // Window-relative, matching the container. This used to be
+                        // `expandedCompactX - screenCenter`, a screen-relative
+                        // offset applied inside a pill-sized window, which put the
+                        // tertiary bubble outside the window entirely while
+                        // collapsed. Same class of bug as the secondary bubble.
                         IntOffset(
-                            (expandedCompactX - screenCenter + miniPillWidth / 2f).roundToPx(),
+                            (collapsedMainLeft - groupCenter + miniPillWidth / 2f).roundToPx(),
                             0
                         )
                     }
@@ -1110,26 +1184,26 @@ private fun SecondaryBubbleContent(
             )
         }
         IslandMode.Flashlight -> {
+            // Registry-resolved rather than hardcoded, so the Flashlight colour
+            // setting reaches the companion bubble too. AUDIT.md section 5.12.
+            val torchAccent = accentColorFor(notification.mode, settings)
             Box(
                 modifier = Modifier
                     .size(20.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFFF59E0B).copy(alpha = 0.25f)),
+                    .background(torchAccent.copy(alpha = 0.25f)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     Icons.Rounded.FlashlightOn,
                     contentDescription = "Flashlight",
-                    tint = Color(0xFFFACC15),
+                    tint = torchAccent,
                     modifier = Modifier.size(12.dp)
                 )
             }
         }
         IslandMode.Hotspot -> {
             HotspotCollapsedGlyph(notification = notification, settings = settings)
-        }
-        IslandMode.Battery -> {
-            BatteryCollapsedGlyph(notification = notification, settings = settings)
         }
         IslandMode.LiveActivity -> {
             LiveActivityCollapsedGlyph(notification = notification, settings = settings)
@@ -1220,16 +1294,6 @@ internal const val MIN_EXPANDED_WIDTH_DP = 260f
  * shape. 1f is fully collapsed, 0.82f is fully absorbed.
  */
 private const val COMPACT_ABSORB_MIN_SCALE = 0.82f
-
-/**
- * HIG height range for the expanded presentation: 84-160pt.
- *
- * The ceiling is only safe because the page content becomes vertically
- * scrollable when it exceeds it; otherwise clamping would make overflow content
- * (long notification bodies, the inline reply field) unreachable.
- */
-internal const val MIN_EXPANDED_HEIGHT_DP = 84f
-internal const val MAX_EXPANDED_HEIGHT_DP = 160f
 
 /**
  * Width of the expanded card.
@@ -1409,18 +1473,8 @@ private fun triggerHapticVibration(context: android.content.Context) {
 
 internal enum class CompactNotificationShape { MiniPill, Circle }
 
-internal fun defaultEstimatedHeightForMode(mode: IslandMode?): Dp {
-    return when (mode) {
-        IslandMode.Music -> 175.dp
-        IslandMode.Notification -> 135.dp
-        IslandMode.IncomingCall, IslandMode.Battery -> 115.dp
-        IslandMode.LiveActivity, IslandMode.Navigation -> 180.dp
-        IslandMode.DownloadUpload, IslandMode.Hotspot -> 160.dp
-        IslandMode.Bluetooth, IslandMode.Flashlight, IslandMode.ScreenRecording,
-        IslandMode.Timer, IslandMode.Stopwatch -> 115.dp
-        IslandMode.Empty, null -> 135.dp
-    }
-}
+internal fun defaultEstimatedHeightForMode(mode: IslandMode?): Dp =
+    presentationFor(mode).estimatedHeight
 
 internal fun compactNotificationShapes(
     notificationCount: Int,

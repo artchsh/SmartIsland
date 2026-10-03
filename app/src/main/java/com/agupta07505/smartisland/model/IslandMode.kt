@@ -12,7 +12,6 @@ enum class IslandMode {
     Notification,
     IncomingCall,
     Music,
-    Battery,
     LiveActivity,
     Navigation,
     DownloadUpload,

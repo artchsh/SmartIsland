@@ -42,11 +42,16 @@ class SystemEventReceiverTest {
         verify { repo.removeNotification("system_battery") }
     }
 
+    /**
+     * The battery island was removed. Battery broadcasts are still consumed, but
+     * only to clear any stale entry so it cannot linger in the stack from an
+     * older install. They must never post a new island entry.
+     */
     @Test
-    fun testBatteryLowPostsLowBatteryNotification() {
+    fun testBatteryBroadcastsOnlyClearAStaleEntryAndNeverPost() {
         val repo = mockk<SmartIslandNotificationRepository>(relaxed = true)
         val receiver = SystemEventReceiver(repo)
-        
+
         val context = mockk<Context>()
         val pm = mockk<PowerManager>(relaxed = true)
         every { pm.isPowerSaveMode } returns false
@@ -57,15 +62,11 @@ class SystemEventReceiverTest {
         every { intent.hasExtra(BatteryManager.EXTRA_LEVEL) } returns true
         every { intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) } returns 15
         every { intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1) } returns 100
-        
+
         receiver.onReceive(context, intent)
-        
-        verify {
-            repo.postNotification(
-                match { it.key == "system_battery" && it.title == "Low Battery" && it.text == "15%" },
-                autoExpand = true
-            )
-        }
+
+        verify { repo.removeNotification("system_battery") }
+        verify(exactly = 0) { repo.postNotification(any(), any()) }
     }
 
     @Test

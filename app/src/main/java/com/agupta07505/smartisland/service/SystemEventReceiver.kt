@@ -27,9 +27,8 @@ class SystemEventReceiver(
     private val settingsProvider: () -> com.agupta07505.smartisland.data.SmartIslandSettings = { com.agupta07505.smartisland.data.SmartIslandSettings.Default }
 ) : BroadcastReceiver() {
 
-    private var lastBatteryPct: Int = -1
-    private var lastBatteryTitle: String? = null
-    private var isCurrentlyCharging: Boolean = false
+    // Battery-island tracking state removed along with the mode itself; the
+    // battery broadcasts are now only used to clear a stale island entry.
 
     private var activeBluetoothAddress: String? = null
     private var lastBluetoothAddress: String? = null
@@ -136,177 +135,26 @@ class SystemEventReceiver(
                         notificationRepository.removeNotification("system_bluetooth")
                     }
                 }
-                Intent.ACTION_POWER_CONNECTED -> {
-                    if (!settingsProvider().enableBatteryMode) {
-                        notificationRepository.removeNotification("system_battery")
-                        return@runCatchingLogged
-                    }
-                    isCurrentlyCharging = true
-                    updateBatteryIsland(context, intent, autoExpand = true)
-                }
-                Intent.ACTION_POWER_DISCONNECTED -> {
-                    if (!settingsProvider().enableBatteryMode) {
-                        notificationRepository.removeNotification("system_battery")
-                        return@runCatchingLogged
-                    }
-                    isCurrentlyCharging = false
-                    updateBatteryState(context, intent, autoExpand = false)
-                }
-                Intent.ACTION_BATTERY_LOW -> {
-                    if (!settingsProvider().enableBatteryMode) {
-                        notificationRepository.removeNotification("system_battery")
-                        return@runCatchingLogged
-                    }
-                    updateBatteryState(context, intent, autoExpand = true)
-                }
-                Intent.ACTION_BATTERY_OKAY -> {
-                    if (!settingsProvider().enableBatteryMode) {
-                        notificationRepository.removeNotification("system_battery")
-                        return@runCatchingLogged
-                    }
-                    updateBatteryState(context, intent, autoExpand = false)
-                }
+                // Battery island REMOVED.
+                //
+                // The island used to mirror charging state, low battery and battery
+                // saver into a `system_battery` entry. That is redundant: the status
+                // bar already shows the same information, permanently and more
+                // accurately, so the island entry was pure duplication occupying the
+                // one surface meant for ongoing activities.
+                //
+                // The broadcasts are still consumed, but only to clear any entry left
+                // behind by an older install so it cannot linger in the stack.
+                Intent.ACTION_POWER_CONNECTED,
+                Intent.ACTION_POWER_DISCONNECTED,
+                Intent.ACTION_BATTERY_LOW,
+                Intent.ACTION_BATTERY_OKAY,
+                Intent.ACTION_BATTERY_CHANGED,
                 PowerManager.ACTION_POWER_SAVE_MODE_CHANGED -> {
-                    if (!settingsProvider().enableBatteryMode) {
-                        notificationRepository.removeNotification("system_battery")
-                        return@runCatchingLogged
-                    }
-                    val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
-                    val isPowerSave = powerManager?.isPowerSaveMode == true
-                    updateBatteryState(context, intent, autoExpand = isPowerSave)
-                }
-                Intent.ACTION_BATTERY_CHANGED -> {
-                    if (!settingsProvider().enableBatteryMode) {
-                        notificationRepository.removeNotification("system_battery")
-                        return@runCatchingLogged
-                    }
-                    val charging = isCharging(intent)
-                    if (charging != isCurrentlyCharging) {
-                        isCurrentlyCharging = charging
-                        if (charging) {
-                            updateBatteryIsland(context, intent, autoExpand = true)
-                        } else {
-                            updateBatteryState(context, intent, autoExpand = false)
-                        }
-                    } else if (charging) {
-                        updateBatteryIsland(context, intent, autoExpand = false)
-                    } else {
-                        updateBatteryState(context, intent, autoExpand = false)
-                    }
+                    notificationRepository.removeNotification("system_battery")
                 }
             }
         }
-    }
-
-    private fun isCharging(intent: Intent): Boolean {
-        val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
-        return status == BatteryManager.BATTERY_STATUS_CHARGING ||
-               status == BatteryManager.BATTERY_STATUS_FULL
-    }
-
-    private fun getBatteryIntent(context: Context, batteryIntent: Intent?): Intent? {
-        return batteryIntent?.takeIf { it.hasExtra(BatteryManager.EXTRA_LEVEL) } ?: runCatchingLogged("SystemEventReceiver", "registerReceiver BATTERY_CHANGED failed") {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED), Context.RECEIVER_EXPORTED)
-            } else {
-                @Suppress("UnspecifiedRegisterReceiverFlag")
-                context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-            }
-        }
-    }
-
-    private fun updateBatteryState(context: Context, intent: Intent?, autoExpand: Boolean) {
-        val intentToUse = getBatteryIntent(context, intent)
-        val level = intentToUse?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: 0
-        val scale = intentToUse?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: 100
-        val batteryPct = if (scale > 0 && level >= 0) (level * 100 / scale.toFloat()).toInt().coerceIn(0, 100) else 20
-
-        val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
-        val isPowerSave = powerManager?.isPowerSaveMode == true
-        val isLowBattery = batteryPct <= 20 || intent?.action == Intent.ACTION_BATTERY_LOW
-
-        if (isCurrentlyCharging) {
-            updateBatteryIsland(context, intentToUse, autoExpand)
-            return
-        }
-
-        if (isPowerSave) {
-            val title = "Battery Saver ON"
-            if (!autoExpand && batteryPct == lastBatteryPct && title == lastBatteryTitle) return
-            lastBatteryPct = batteryPct
-            lastBatteryTitle = title
-
-            notificationRepository.postNotification(
-                IslandNotification(
-                    key = "system_battery",
-                    packageName = "com.android.systemui",
-                    appName = "System",
-                    title = title,
-                    text = "$batteryPct%",
-                    category = "battery_saver",
-                    mode = IslandMode.Battery,
-                    timeMillis = System.currentTimeMillis()
-                ),
-                autoExpand = autoExpand
-            )
-        } else if (isLowBattery) {
-            val title = "Low Battery"
-            if (!autoExpand && batteryPct == lastBatteryPct && title == lastBatteryTitle) return
-            lastBatteryPct = batteryPct
-            lastBatteryTitle = title
-
-            notificationRepository.postNotification(
-                IslandNotification(
-                    key = "system_battery",
-                    packageName = "com.android.systemui",
-                    appName = "System",
-                    title = title,
-                    text = "$batteryPct%",
-                    category = "battery_low",
-                    mode = IslandMode.Battery,
-                    timeMillis = System.currentTimeMillis()
-                ),
-                autoExpand = autoExpand
-            )
-        } else {
-            lastBatteryPct = -1
-            lastBatteryTitle = null
-            notificationRepository.removeNotification("system_battery")
-        }
-    }
-
-    private fun updateBatteryIsland(context: Context, batteryIntent: Intent?, autoExpand: Boolean) {
-        val intentToUse = getBatteryIntent(context, batteryIntent)
-        val level = intentToUse?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: 0
-        val scale = intentToUse?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: 100
-        if (level < 0 || scale <= 0) return
-        val batteryPct = (level * 100 / scale.toFloat()).toInt().coerceIn(0, 100)
-        val status = intentToUse?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
-
-        val title = when (status) {
-            BatteryManager.BATTERY_STATUS_FULL -> "Fully Charged"
-            else -> "Charging"
-        }
-
-        // Skip redundant posts when both the percentage and title haven't changed.
-        if (!autoExpand && batteryPct == lastBatteryPct && title == lastBatteryTitle) return
-        lastBatteryPct = batteryPct
-        lastBatteryTitle = title
-
-        notificationRepository.postNotification(
-            IslandNotification(
-                key = "system_battery",
-                packageName = "com.android.systemui",
-                appName = "System",
-                title = title,
-                text = "$batteryPct%",
-                category = "battery_charging",
-                mode = IslandMode.Battery,
-                icon = null,
-                timeMillis = System.currentTimeMillis()
-            ),
-            autoExpand = autoExpand
-        )
     }
 
     @SuppressLint("MissingPermission")

@@ -647,19 +647,6 @@ class SmartIslandOverlayService : AccessibilityService() {
                         }
                         startActivity(intent)
                     }
-                    com.agupta07505.smartisland.model.IslandMode.Battery -> {
-                        val intent = Intent(Intent.ACTION_POWER_USAGE_SUMMARY).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        if (intent.resolveActivity(packageManager) != null) {
-                            startActivity(intent)
-                        } else {
-                            val altIntent = Intent(android.provider.Settings.ACTION_BATTERY_SAVER_SETTINGS).apply {
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            startActivity(altIntent)
-                        }
-                    }
                     com.agupta07505.smartisland.model.IslandMode.Hotspot -> {
                         val intent = Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS).apply {
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -822,6 +809,19 @@ class SmartIslandOverlayService : AccessibilityService() {
         private const val WINDOWING_MODE_FREEFORM = 5
         private const val OVERLAY_CHANNEL_ID = "smart_island_overlay"
         private const val OVERLAY_CHANNEL_NAME = "Smart Island overlay"
+        /**
+         * How long the overlay window stays MATCH_PARENT after `expanded` flips
+         * to false, before shrinking back to pill size.
+         *
+         * This has to be at least as long as the collapse animation in
+         * IslandOverlayView, otherwise the content is still animating while the
+         * window it is laid out in shrinks underneath it, which shows up as
+         * elements jumping as they are re-measured against a smaller box.
+         *
+         * The collapse spring is critically damped at stiffness 780, which settles
+         * in roughly 200ms, so 220ms clears it. Kept in step with
+         * IslandOverlayView's collapse specs.
+         */
         private const val AUTO_COLLAPSE_DELAY_MS = 220L
     }
 }

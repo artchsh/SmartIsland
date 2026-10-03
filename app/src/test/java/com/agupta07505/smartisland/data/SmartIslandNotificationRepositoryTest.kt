@@ -256,15 +256,16 @@ class SmartIslandNotificationRepositoryTest {
 
     @Test
     fun testShowDemoNotification() {
+        // IslandMode.Battery was removed from the island; the demo fixture now
+        // uses Notification, which is the mode an ordinary message maps to.
         val repository = SmartIslandNotificationRepository()
-        repository.showDemo(IslandMode.Battery)
+        repository.showDemo(IslandMode.Notification)
 
         val notifications = repository.notifications.value
         assertEquals(1, notifications.size)
         val demo = notifications[0]
-        assertEquals("demo_battery", demo.key)
-        assertEquals(IslandMode.Battery, demo.mode)
-        assertEquals("85%", demo.text)
+        assertEquals("demo_notif", demo.key)
+        assertEquals(IslandMode.Notification, demo.mode)
     }
 
     @Test
@@ -281,7 +282,7 @@ class SmartIslandNotificationRepositoryTest {
             timeMillis = System.currentTimeMillis()
         )
         repository.postNotification(realNotif)
-        repository.showDemo(IslandMode.Battery)
+        repository.showDemo(IslandMode.Notification)
 
         assertEquals(2, repository.notifications.value.size)
 

@@ -29,12 +29,15 @@ import androidx.compose.ui.unit.dp
  *
  * @param rotationAngle supplies the current angle in degrees. Read inside the
  *   draw phase, so it may be a state read without causing recomposition.
+ * @param color required rather than defaulted. It previously defaulted to a
+ *   hardcoded green, which meant a caller that forgot to pass one silently got
+ *   battery-green dots regardless of the mode it was rendering.
  */
 @Composable
 fun DottedRing(
     progress: Float,
+    color: Color,
     modifier: Modifier = Modifier,
-    color: Color = Color(0xFF10B981),
     trackColor: Color = Color(0x33FFFFFF),
     numDots: Int = 16,
     dotRadius: androidx.compose.ui.unit.Dp = 1.2.dp,

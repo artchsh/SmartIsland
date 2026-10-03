@@ -28,7 +28,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AvTimer
-import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.BluetoothConnected
 import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.Check
@@ -123,7 +122,6 @@ fun CustomizationsSection(
         listOf(
             FeatureColorConfig("music", R.string.color_music_visualizer, Icons.Rounded.MusicNote, settings.musicVisualizerColor) { repository.setMusicVisualizerColor(it) },
             FeatureColorConfig("call", R.string.color_phone_calls, Icons.Rounded.Call, settings.callColor) { repository.setCallColor(it) },
-            FeatureColorConfig("battery", R.string.color_battery_charging, Icons.Rounded.BatteryChargingFull, settings.batteryColor) { repository.setBatteryColor(it) },
             FeatureColorConfig("notification", R.string.color_notification_dot, Icons.Rounded.Notifications, settings.notificationDotColor) { repository.setNotificationDotColor(it) },
             FeatureColorConfig("hotspot", R.string.color_hotspot_tethering, Icons.Rounded.WifiTethering, settings.hotspotColor) { repository.setHotspotColor(it) },
             FeatureColorConfig("navigation", R.string.color_maps_navigation, Icons.Rounded.Navigation, settings.navigationColor) { repository.setNavigationColor(it) },

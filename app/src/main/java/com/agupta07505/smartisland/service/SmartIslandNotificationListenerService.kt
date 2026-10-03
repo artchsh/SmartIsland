@@ -495,6 +495,27 @@ class SmartIslandNotificationListenerService : NotificationListenerService() {
         )
         android.util.Log.d(TAG, "handleNotificationPosted: mode=$mode key=${sbn.key} title=${extras.getCharSequence(Notification.EXTRA_TITLE)}")
 
+        // Live Activity allowlist.
+        //
+        // The island is for *ongoing* activities, not for every notification.
+        // With music playing and an unrelated message arriving, the message must
+        // appear as a normal notification and leave the island to the music.
+        //
+        // Returning here means the notification is never posted to the island and,
+        // critically, `shouldBeIslandOnly` is never reached — so it is never
+        // cancelled from the system shade. It stays a completely ordinary
+        // notification.
+        //
+        // Incoming calls are always admitted regardless of the allowlist: a
+        // ringing phone is definitionally an activity you must not miss.
+        if (!isEligibleForIsland(sbn.packageName, mode, settings)) {
+            android.util.Log.d(
+                TAG,
+                "Not a Live Activity source, leaving in the shade: pkg=${sbn.packageName} mode=$mode"
+            )
+            return
+        }
+
         // Check intelligent anti-spam notification cooldown
         if (NotificationCooldownManager.shouldThrottle(sbn, settings, mode)) {
             android.util.Log.d(TAG, "Notification throttled by cooldown: pkg=${sbn.packageName} key=${sbn.key}")
@@ -769,6 +790,12 @@ class SmartIslandNotificationListenerService : NotificationListenerService() {
         // Priority only mode: standard notifications are blocked by default if not verified
         return true
     }
+
+    internal fun isEligibleForIsland(
+        packageName: String,
+        mode: IslandMode,
+        settings: SmartIslandSettings
+    ): Boolean = isLiveActivitySource(packageName, mode, settings)
 
     internal fun shouldSuppressFromIsland(
         sbn: StatusBarNotification,
@@ -1140,3 +1167,53 @@ class SmartIslandNotificationListenerService : NotificationListenerService() {
         private const val AUTO_EXPAND_DEBOUNCE_MS = 1500L
     }
 }
+
+/**
+ * Whether a notification's source is eligible to appear in the island at all.
+ *
+ * This is the iOS Live Activity model: the Dynamic Island is reserved for a small
+ * number of *ongoing* activities, not used as a second notification shade. When
+ * [SmartIslandSettings.liveActivityAppsOnly] is on, a notification from an app
+ * that is not on the allowlist is left entirely alone — it is neither shown in
+ * the island nor cancelled from the system shade, so it arrives as an ordinary
+ * notification.
+ *
+ * Pure and top-level so it can be unit tested without a live
+ * NotificationListenerService.
+ *
+ * Modes that are inherently an ongoing activity rather than a notification are
+ * always admitted, because suppressing them would lose information the user
+ * needs:
+ *  - incoming calls, always
+ *  - media playback, which is a continuous session rather than an event
+ *  - timers and stopwatches, which are running clocks
+ *  - navigation, which is a continuous route
+ *  - screen recording, which is a running capture
+ */
+internal fun isLiveActivitySource(
+    packageName: String,
+    mode: IslandMode,
+    settings: SmartIslandSettings
+): Boolean {
+    if (!settings.liveActivityAppsOnly) return true
+
+    // Incoming calls bypass the allowlist entirely.
+    if (mode == IslandMode.IncomingCall) return true
+
+    if (mode in ALWAYS_ISLAND_MODES) return true
+
+    return settings.liveActivityPackages.contains(packageName)
+}
+
+/**
+ * Modes that represent a running activity rather than a discrete event, and so
+ * are not subject to the app allowlist.
+ */
+private val ALWAYS_ISLAND_MODES: Set<IslandMode> = setOf(
+    IslandMode.IncomingCall,
+    IslandMode.Music,
+    IslandMode.Timer,
+    IslandMode.Stopwatch,
+    IslandMode.Navigation,
+    IslandMode.ScreenRecording
+)

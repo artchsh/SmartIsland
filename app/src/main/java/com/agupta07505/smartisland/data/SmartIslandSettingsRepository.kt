@@ -45,7 +45,6 @@ class SmartIslandSettingsRepository(private val context: Context) {
         val CornerRadius = floatPreferencesKey("corner_radius")
         val Opacity = floatPreferencesKey("opacity")
         val PillColor = longPreferencesKey("pill_color")
-        val BatteryColor = longPreferencesKey("battery_color")
         val NotificationDotColor = longPreferencesKey("notification_dot_color")
         val MusicVisualizerColor = longPreferencesKey("music_visualizer_color")
         val HotspotColor = longPreferencesKey("hotspot_color")
@@ -61,6 +60,8 @@ class SmartIslandSettingsRepository(private val context: Context) {
         val EnableAppShortcuts = booleanPreferencesKey("enable_app_shortcuts")
         val ShortcutPackages = stringSetPreferencesKey("shortcut_packages")
         val ShowRecentApps = booleanPreferencesKey("show_recent_apps")
+        val LiveActivityAppsOnly = booleanPreferencesKey("live_activity_apps_only")
+        val LiveActivityPackages = stringSetPreferencesKey("live_activity_packages")
         val WelcomeDialogShown = booleanPreferencesKey("welcome_dialog_shown")
         val ShowOnLockScreen = booleanPreferencesKey("show_on_lock_screen")
         val LockScreenPrivacy = stringPreferencesKey("lock_screen_privacy")
@@ -74,6 +75,7 @@ class SmartIslandSettingsRepository(private val context: Context) {
         val AutoHidePill = booleanPreferencesKey("auto_hide_pill")
         val AutoHideTimeoutSeconds = intPreferencesKey("auto_hide_timeout_seconds")
         val ShowInLandscape = booleanPreferencesKey("show_in_landscape")
+        val MatchDisplayCorners = booleanPreferencesKey("match_display_corners")
         val AutoExpandOnNotification = booleanPreferencesKey("auto_expand_on_notification")
         val EnableShadow = booleanPreferencesKey("enable_shadow")
         val ShadowElevation = floatPreferencesKey("shadow_elevation")
@@ -84,7 +86,6 @@ class SmartIslandSettingsRepository(private val context: Context) {
         val EnableNotificationHistory = booleanPreferencesKey("enable_notification_history")
         val NotificationHistoryRetentionHours = intPreferencesKey("notification_history_retention_hours")
         val ShowBluetoothBattery = booleanPreferencesKey("show_bluetooth_battery")
-        val EnableBatteryMode = booleanPreferencesKey("enable_battery_mode")
         val EnableNotificationCooldown = booleanPreferencesKey("enable_notification_cooldown")
         val NotificationCooldownDurationMinutes = intPreferencesKey("notification_cooldown_duration_minutes")
         val NotificationCooldownThreshold = intPreferencesKey("notification_cooldown_threshold")
@@ -156,7 +157,6 @@ class SmartIslandSettingsRepository(private val context: Context) {
                     SmartIslandSettings.MAX_OPACITY
                 ),
                 pillColor = validColor(prefs[Keys.PillColor], defaults.pillColor),
-                batteryColor = validColor(prefs[Keys.BatteryColor], defaults.batteryColor),
                 notificationDotColor = validColor(
                     prefs[Keys.NotificationDotColor],
                     defaults.notificationDotColor
@@ -183,6 +183,12 @@ class SmartIslandSettingsRepository(private val context: Context) {
                     ?.toSet()
                     ?: defaults.shortcutPackages,
                 showRecentApps = prefs[Keys.ShowRecentApps] ?: defaults.showRecentApps,
+                liveActivityAppsOnly = prefs[Keys.LiveActivityAppsOnly] ?: defaults.liveActivityAppsOnly,
+                liveActivityPackages = prefs[Keys.LiveActivityPackages]
+                    ?.filter { it.isNotBlank() }
+                    ?.take(64)
+                    ?.toSet()
+                    ?: defaults.liveActivityPackages,
                 welcomeDialogShown = prefs[Keys.WelcomeDialogShown] ?: defaults.welcomeDialogShown,
                 showOnLockScreen = prefs[Keys.ShowOnLockScreen] ?: defaults.showOnLockScreen,
                 lockScreenPrivacy = prefs[Keys.LockScreenPrivacy]
@@ -210,6 +216,7 @@ class SmartIslandSettingsRepository(private val context: Context) {
                 autoHidePill = prefs[Keys.AutoHidePill] ?: defaults.autoHidePill,
                 autoHideTimeoutSeconds = prefs[Keys.AutoHideTimeoutSeconds] ?: defaults.autoHideTimeoutSeconds,
                 showInLandscape = prefs[Keys.ShowInLandscape] ?: defaults.showInLandscape,
+                matchDisplayCorners = prefs[Keys.MatchDisplayCorners] ?: defaults.matchDisplayCorners,
                 autoExpandOnNotification = prefs[Keys.AutoExpandOnNotification] ?: defaults.autoExpandOnNotification,
                 enableShadow = prefs[Keys.EnableShadow] ?: defaults.enableShadow,
                 shadowElevation = validDimension(
@@ -225,7 +232,6 @@ class SmartIslandSettingsRepository(private val context: Context) {
                 enableNotificationHistory = prefs[Keys.EnableNotificationHistory] ?: defaults.enableNotificationHistory,
                 notificationHistoryRetentionHours = prefs[Keys.NotificationHistoryRetentionHours] ?: defaults.notificationHistoryRetentionHours,
                 showBluetoothBattery = prefs[Keys.ShowBluetoothBattery] ?: defaults.showBluetoothBattery,
-                enableBatteryMode = prefs[Keys.EnableBatteryMode] ?: defaults.enableBatteryMode,
                 enableNotificationCooldown = prefs[Keys.EnableNotificationCooldown] ?: defaults.enableNotificationCooldown,
                 notificationCooldownDurationMinutes = prefs[Keys.NotificationCooldownDurationMinutes] ?: defaults.notificationCooldownDurationMinutes,
                 notificationCooldownThreshold = prefs[Keys.NotificationCooldownThreshold] ?: defaults.notificationCooldownThreshold,
@@ -322,9 +328,6 @@ class SmartIslandSettingsRepository(private val context: Context) {
     }
     suspend fun setPillColor(value: Long) = editSafely {
         it[Keys.PillColor] = validColor(value, SmartIslandSettings.Default.pillColor)
-    }
-    suspend fun setBatteryColor(value: Long) = editSafely {
-        it[Keys.BatteryColor] = validColor(value, SmartIslandSettings.Default.batteryColor)
     }
     suspend fun setNotificationDotColor(value: Long) = editSafely {
         it[Keys.NotificationDotColor] = validColor(
@@ -453,9 +456,6 @@ class SmartIslandSettingsRepository(private val context: Context) {
     suspend fun setShowBluetoothBattery(value: Boolean) = editSafely {
         it[Keys.ShowBluetoothBattery] = value
     }
-    suspend fun setEnableBatteryMode(value: Boolean) = editSafely {
-        it[Keys.EnableBatteryMode] = value
-    }
     suspend fun setEnableNotificationCooldown(value: Boolean) = editSafely {
         it[Keys.EnableNotificationCooldown] = value
     }
@@ -572,7 +572,6 @@ class SmartIslandSettingsRepository(private val context: Context) {
             SmartIslandSettings.MAX_OPACITY
         )
         prefs[Keys.PillColor] = validColor(settings.pillColor, SmartIslandSettings.Default.pillColor)
-        prefs[Keys.BatteryColor] = validColor(settings.batteryColor, SmartIslandSettings.Default.batteryColor)
         prefs[Keys.NotificationDotColor] = validColor(settings.notificationDotColor, SmartIslandSettings.Default.notificationDotColor)
         prefs[Keys.MusicVisualizerColor] = validColor(settings.musicVisualizerColor, SmartIslandSettings.Default.musicVisualizerColor)
         prefs[Keys.HotspotColor] = validColor(settings.hotspotColor, SmartIslandSettings.Default.hotspotColor)
@@ -592,6 +591,11 @@ class SmartIslandSettingsRepository(private val context: Context) {
             .take(MAX_SHORTCUTS)
             .toSet()
         prefs[Keys.ShowRecentApps] = settings.showRecentApps
+        prefs[Keys.LiveActivityAppsOnly] = settings.liveActivityAppsOnly
+        prefs[Keys.LiveActivityPackages] = settings.liveActivityPackages
+            .filter { it.isNotBlank() }
+            .take(64)
+            .toSet()
         prefs[Keys.WelcomeDialogShown] = settings.welcomeDialogShown
         prefs[Keys.ShowOnLockScreen] = settings.showOnLockScreen
         prefs[Keys.LockScreenPrivacy] = settings.lockScreenPrivacy.takeIf { it in VALID_LOCK_SCREEN_PRIVACY_VALUES }
@@ -612,6 +616,7 @@ class SmartIslandSettingsRepository(private val context: Context) {
         prefs[Keys.AutoHidePill] = settings.autoHidePill
         prefs[Keys.AutoHideTimeoutSeconds] = settings.autoHideTimeoutSeconds.coerceIn(1, 120)
         prefs[Keys.ShowInLandscape] = settings.showInLandscape
+        prefs[Keys.MatchDisplayCorners] = settings.matchDisplayCorners
         prefs[Keys.AutoExpandOnNotification] = settings.autoExpandOnNotification
         prefs[Keys.EnableShadow] = settings.enableShadow
         prefs[Keys.ShadowElevation] = validDimension(
@@ -627,7 +632,6 @@ class SmartIslandSettingsRepository(private val context: Context) {
         prefs[Keys.EnableNotificationHistory] = settings.enableNotificationHistory
         prefs[Keys.NotificationHistoryRetentionHours] = settings.notificationHistoryRetentionHours
         prefs[Keys.ShowBluetoothBattery] = settings.showBluetoothBattery
-        prefs[Keys.EnableBatteryMode] = settings.enableBatteryMode
         prefs[Keys.EnableNotificationCooldown] = settings.enableNotificationCooldown
         prefs[Keys.NotificationCooldownDurationMinutes] = settings.notificationCooldownDurationMinutes
         prefs[Keys.NotificationCooldownThreshold] = settings.notificationCooldownThreshold

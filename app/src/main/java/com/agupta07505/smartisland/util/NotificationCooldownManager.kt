@@ -96,7 +96,6 @@ object NotificationCooldownManager {
             mode == IslandMode.Music ||
             mode == IslandMode.Navigation ||
             mode == IslandMode.Hotspot ||
-            mode == IslandMode.Battery ||
             mode == IslandMode.Flashlight ||
             mode == IslandMode.ScreenRecording
     }

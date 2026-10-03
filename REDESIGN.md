@@ -45,6 +45,73 @@ Derived margin: `430 − 408 = 22`, i.e. **11 pt per side** on the widest suppor
 screen, and `393 − 371 = 22` on the narrowest. The HIG is internally consistent at
 an 11 pt inset.
 
+### 2.1 Colours sampled from a reference screenshot
+
+Rather than eyeballed, values were sampled from a photograph of a real Dynamic
+Island (1179 px wide capture, i.e. exactly 3 px per pt):
+
+| Element | Sampled value |
+| --- | --- |
+| Island hairline border | `RGB(40,40,40)` = `#282828` on pure black |
+| Border thickness | 2–3 px ≈ **1 dp** |
+| Seek bar, played | `RGB(156,155,162)` = `#9C9BA2` |
+| Seek bar, remaining | `RGB(36,36,37)` = `#242425` |
+| Seek bar thickness | 21 px = **7 pt** |
+| Seek bar end caps | fully rounded, **no thumb** |
+
+The border is defined as `Color.White.copy(alpha = 40f/255f)` rather than a
+literal grey so it stays neutral over both the black interior and album artwork.
+Rendering was verified against the reference at `RGB(41,41,41)` before the alpha
+was tightened to land exactly on 40.
+
+### 2.2 Corner radius follows the display
+
+The HIG's "its rounded corner shape matches the TrueDepth camera" means the
+island's curvature should be **continuous with the screen's own**, not a fixed
+constant. Smart Island hardcoded 34 dp for the expanded card and used a
+user-configurable value for the pill, which looks subtly wrong on any device whose
+corners are a different shape.
+
+`util/DisplayCornerRadius.kt` reads the real value from
+`WindowInsets.getRoundedCorner(WindowInsets.RoundedCorner.POSITION_TOP_LEFT)`
+(API 31+), falling back to top-right, then to the HIG's documented 44 pt. Values
+are reported in pixels and are converted to dp. The `matchDisplayCorners` setting
+(default on) chooses between the reported radius and the user's manual
+`cornerRadius`.
+
+A one-line diagnostic log reports the resolved value so a mismatch can be checked
+without guessing:
+
+```
+adb logcat -s SmartIslandOverlayView | grep "display corner radius"
+```
+
+### 2.3 What "Live Activity" actually means
+
+From WWDC23 "Meet ActivityKit", the load-bearing reference for §3.3:
+
+- A Live Activity **"has a discrete start and end"** and is begun by **explicit
+  user action inside the app**. It is not notification-driven.
+- It is **"user-moderated similar to Notifications"**.
+- **"Show most essential content. Simple design. Show additional details in the
+  application."**
+- When one activity is active it renders in the **compact** presentation. When
+  several apps have activities the system shows **up to two**, both in the
+  **minimal** presentation, one attached to the camera and one detached.
+- **"Long press a Live Activity to display its expanded presentation."**
+- The expanded presentation is **divided into regions** (leading / trailing /
+  centre / bottom).
+- iOS 17 added **interactive** Live Activities: buttons and toggles directly in
+  the expanded view.
+
+The first two points are the justification for the allowlist: Smart Island cannot
+know which apps have ongoing activities, so it approximates with an explicit
+allowlist plus a set of modes that are inherently continuous.
+
+The "minimal presentation for secondary activities" behaviour is also why the
+companion bubble is a small circle rather than a second full card — which this app
+already had right.
+
 ---
 
 ## 3. Decisions taken
@@ -76,6 +143,46 @@ pointer, fired **both** tap-to-open and tap-to-collapse on one tap (AUDIT §5.1)
 - Card width: `screenWidth − 2 × 12dp` = **421 dp** on this device.
   HIG-equivalent: HIG yields 371–408 on 393–430 pt screens; ours is 421 on 445 dp.
 - Card height: clamped to **84–160 dp** by content.
+
+### 3.3 Live Activity allowlist — the island is not a second shade
+
+A Dynamic Island is a glanceable surface for a small number of *ongoing*
+activities. It is not a mirror for the notification shade.
+
+Smart Island originally promoted every notification into the island and, because
+`shouldBeIslandOnly` returns true for most modes, **cancelled it from the system
+shade**. That turned a status surface into an inbox: a message arriving while
+music played would displace the music and replace it with itself.
+
+`SmartIslandSettings.liveActivityAppsOnly` (default **on**) restricts the island
+to:
+
+- an explicit package allowlist (`liveActivityPackages`), seeded with Spotify,
+  Dodo Pizza and the common dialers; and
+- modes that are inherently *ongoing* rather than discrete events — incoming
+  calls (always, regardless of package), media playback, timers, stopwatches,
+  navigation and screen recording.
+
+Anything else is left completely alone: never shown in the island, and — critically
+— never cancelled from the shade, so it arrives as an ordinary notification.
+With music playing and a message arriving, the music stays and the message
+appears normally.
+
+Returning early in `handleNotificationPosted`, before `shouldBeIslandOnly` is
+ever reached, is what guarantees the notification is not suppressed. Seven tests
+cover this in `LiveActivityAllowlistTest`.
+
+### 3.4 Battery island removed
+
+The battery island mirrored charging state, low battery and battery saver into a
+`system_battery` entry. That duplicated the status bar, which shows the same
+information permanently and more accurately, and it occupied the one surface
+meant for activities the user actually initiated.
+
+Removed: `IslandMode.Battery`, `BatteryExpanded.kt`, `BatteryCollapsedGlyph`, the
+demo fixture, the settings toggle and the `enableBatteryMode` preference, and the
+battery branches of every dispatch block. Battery broadcasts are still consumed,
+but only to clear a stale entry from an older install.
 
 ---
 
@@ -122,6 +229,22 @@ for step 2.
 ---
 
 ## 5. Phases
+
+### Motion
+
+Springs are symmetric, so a single spec means the same feel in both directions.
+The Dynamic Island overshoots slightly on the way in and **settles** on the way
+out — a bounce on collapse reads as wrong.
+
+| Direction | Damping ratio | Stiffness | Feel |
+| --- | --- | --- | --- |
+| Expanding | 0.86 | 520 | small overshoot |
+| Collapsing | **1.0** (critically damped) | 780 | no overshoot, settles ~200 ms |
+
+This is also load-bearing for correctness, not just feel. The overlay window stays
+`MATCH_PARENT` for `AUTO_COLLAPSE_DELAY_MS` (220 ms) after `expanded` flips, and
+only then shrinks to pill size. If the content animation outlasted the window, the
+content would be laid out against a shrinking box and visibly jump.
 
 ### Phase A — geometry and window-bounds morph
 - `computeExpandedCardGeometry(...)` — pure, unit-tested, equal top/side inset

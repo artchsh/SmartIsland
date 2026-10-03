@@ -1499,3 +1499,69 @@ Investigated and dismissed, recorded so they are not re-litigated.
   actionable.
 - **"`values-en` might serve a purpose."** It is byte-identical to `values/`, which
   is already English, so it is pure duplication with no behavioural effect.
+
+---
+
+## 13. Implemented since the audit
+
+Recorded here so the dispositions above stay accurate. Full design rationale is
+in [REDESIGN.md](REDESIGN.md).
+
+### 13.1 Performance and battery
+
+| Item | Disposition |
+| --- | --- |
+| 2.1 screen-off collection | Fixed — `collectAsStateWithLifecycle(RESUMED)` on all six overlay flows |
+| 2.2 music 33fps + binder IPC | Fixed — 10fps with change detection; artwork driven from the controller callback |
+| 2.3 60fps recomposition | Fixed — three animated values moved to the draw phase; `DottedRing` rotation moved to `graphicsLayer` |
+| 2.4 no `onTrimMemory` | Fixed — added to the listener service |
+| 2.5 regexes in composables | Fixed — 11 hoisted, plus 3 parser `Pattern`s and a per-call `SimpleDateFormat` |
+| 2.7 battery 3s ticker | Removed with the battery mode (§13.4) |
+| 2.8 per-pixel wave | Fixed — wave sampled every 3dp, and off by default |
+
+### 13.2 Correctness
+
+| Item | Disposition |
+| --- | --- |
+| 4.1 hidden-API exemption | **Fixed** — `VMRuntime.setHiddenApiExemptions(["L"])` and the whole touchable-region reflection deleted; touch pass-through now uses `FLAG_NOT_TOUCH_MODAL` with a pill-sized window. Verified on device: collapsed `577x137` with `touchableRegion == frame` |
+| 5.1 one tap, two actions | Fixed — explicit hit test against the card rect |
+| 5.2 horizontal drag fires tap | Fixed — both accumulators tested |
+| 5.3 stale captures | Partially fixed — `settings.autoHidePill`/`enableAppShortcuts` now read `currentSettings`. **Correction:** the original claim that `isInputActive` was stale was wrong; it is a `pointerInput` key so the block restarts |
+| 5.4 hold job leaks | Fixed — now a child of the pointerInput block via `coroutineScope` |
+| 5.6 cancellation unhandled | Fixed |
+| §4.10 Motorola → ASUS component | Fixed |
+| §4.11 null intent kills the whole OEM ladder | Found while rewriting the tests; fixed by removing the chained `setComponent` calls |
+
+### 13.3 UI
+
+- iOS geometry: expanded card inset by a fixed margin, equal on top and sides, so
+  the morph starts from zero vertical displacement.
+- iOS gestures: long-press expands (while the finger is down), tap opens the app.
+- Staggered cross-fade; the compact content is absorbed into the growing shape.
+- Direction-aware springs: overshoot on expand, critically damped on collapse.
+- **Companion bubble teleport fixed.** Its offset was a screen-relative value
+  animated inside a pill-sized window, so it shot off to the right mid-transition.
+  The bubble is only visible while collapsed, so the expanded offset is never
+  needed; it is no longer animated at all. The tertiary bubble had the same bug.
+- Hairline border, sampled from a reference screenshot at `RGB(40,40,40)` / 1dp.
+- Seek bar restyled to the measured reference: 7pt capsule, `#9C9BA2` played,
+  `#242425` remaining, no thumb. Added `progressBarRangeInfo` semantics.
+- Corner radius now read from `WindowInsets.getRoundedCorner` so it tracks the
+  display's own curvature.
+- Mode presentation consolidated into `IslandModePresentation.kt`; three of the
+  seven duplicated dispatch blocks removed and the colour duplication eliminated.
+
+### 13.4 Battery island removed
+
+`IslandMode.Battery`, `BatteryExpanded.kt`, `BatteryCollapsedGlyph`, the demo
+fixture, the settings toggle, `enableBatteryMode` and `batteryColor` are all gone.
+It duplicated the status bar and occupied a surface meant for activities the user
+initiated.
+
+### 13.5 Live Activity allowlist
+
+The island no longer mirrors every notification. `liveActivityAppsOnly` (default
+on) restricts it to an explicit package allowlist plus the modes that are
+inherently ongoing (calls, media, timers, stopwatch, navigation, screen
+recording). Everything else stays an ordinary notification and is never cancelled
+from the shade.

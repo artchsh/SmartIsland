@@ -31,7 +31,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.ArrowDropDown
-import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.BluetoothConnected
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.HourglassBottom
@@ -498,13 +497,6 @@ fun NotificationsAndPrivacySection(
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
 
-                ToggleRowItem(
-                    title = stringResource(R.string.toggle_battery_mode_title),
-                    subtitle = stringResource(R.string.toggle_battery_mode_desc),
-                    icon = Icons.Rounded.BatteryChargingFull,
-                    checked = settings.enableBatteryMode,
-                    onCheckedChange = { scope.launch { repository.setEnableBatteryMode(it) } }
-                )
             }
         }
 

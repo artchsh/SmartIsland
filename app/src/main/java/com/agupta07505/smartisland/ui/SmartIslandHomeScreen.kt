@@ -53,7 +53,6 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.AvTimer
-import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.BluetoothConnected
 import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.CloudDownload
@@ -602,7 +601,6 @@ private fun SimulationLabCard(
             ModeItem(IslandMode.Music, Icons.Rounded.MusicNote),
             ModeItem(IslandMode.IncomingCall, Icons.Rounded.Call),
             ModeItem(IslandMode.Notification, Icons.Rounded.Notifications),
-            ModeItem(IslandMode.Battery, Icons.Rounded.BatteryChargingFull),
             ModeItem(IslandMode.LiveActivity, Icons.Rounded.Navigation),
             ModeItem(IslandMode.Navigation, Icons.Rounded.Explore),
             ModeItem(IslandMode.DownloadUpload, Icons.Rounded.FileDownload),

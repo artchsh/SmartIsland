@@ -38,7 +38,6 @@ class SmartIslandSettingsTest {
         assertEquals(true, settings.enableAppShortcuts)
         assertEquals(true, settings.allowNetworkChecks)
         assertEquals(true, settings.showBluetoothBattery)
-        assertEquals(true, settings.enableBatteryMode)
         assertEquals(false, settings.enableNotificationCooldown)
         assertEquals(3, settings.notificationCooldownDurationMinutes)
         assertEquals(3, settings.notificationCooldownThreshold)
@@ -83,7 +82,6 @@ class SmartIslandSettingsTest {
             cornerRadius = 26f,
             opacity = 0.85f,
             pillColor = 0xFF1E293BL,
-            batteryColor = 0xFF22C55EL,
             notificationDotColor = 0xFF3B82F6L,
             musicVisualizerColor = 0xFFEC4899L,
             hotspotColor = 0xFFEAB308L,
@@ -226,7 +224,7 @@ class SmartIslandSettingsTest {
         assertEquals(0.9f, settings.opacity)
         assertEquals(4278190080L, settings.pillColor)
         // Check defaults are preserved for unspecified fields
-        assertEquals(SmartIslandSettings.Default.batteryColor, settings.batteryColor)
+        assertEquals(SmartIslandSettings.Default.notificationDotColor, settings.notificationDotColor)
         assertEquals(SmartIslandSettings.Default.shortcutPackages, settings.shortcutPackages)
     }
 

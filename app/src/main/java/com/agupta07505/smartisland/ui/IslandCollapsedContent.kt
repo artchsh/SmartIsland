@@ -161,9 +161,6 @@ fun IslandCollapsedContent(
                         }
                     }
                 }
-                IslandMode.Battery -> {
-                    BatteryCollapsedGlyph(notification = notification, settings = settings)
-                }
                 IslandMode.LiveActivity -> {
                     LiveActivityCollapsedGlyph(notification = notification, settings = settings)
                 }
@@ -259,23 +256,6 @@ fun IslandCollapsedContent(
                         color = Color(settings.musicVisualizerColor)
                     )
                 }
-                IslandMode.Battery -> {
-                    val pctText = notification?.text ?: "49%"
-                    val title = notification?.title?.lowercase() ?: ""
-                    val isBatterySaver = title.contains("saver") || notification?.category == "battery_saver"
-                    val isLowBattery = title.contains("low") || notification?.category == "battery_low" || (pctText.replace("%", "").toFloatOrNull() ?: 50f) <= 20f
-                    val textColor = when {
-                        isLowBattery -> Color(0xFFEF4444)
-                        isBatterySaver -> Color(0xFFF59E0B)
-                        else -> Color(settings.batteryColor)
-                    }
-                    Text(
-                        text = pctText,
-                        color = textColor,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
                 IslandMode.LiveActivity -> {
                     LiveActivityCollapsedRight(notification = notification, settings = settings)
                 }
@@ -294,14 +274,20 @@ fun IslandCollapsedContent(
                 IslandMode.Flashlight -> {
                     Text(
                         text = "ON",
-                        color = Color(0xFFFACC15),
+                        // Resolved through the registry rather than hardcoded, so
+                        // changing the Flashlight colour in settings actually
+                        // affects the pill. AUDIT.md section 5.12.
+                        color = accentColorFor(mode, settings),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
                 IslandMode.ScreenRecording -> {
                     val time = notification?.timeMillis ?: System.currentTimeMillis()
-                    CallTimer(postTimeMillis = time, color = Color(0xFFEF4444))
+                    CallTimer(
+                        postTimeMillis = time,
+                        color = accentColorFor(mode, settings)
+                    )
                 }
                 IslandMode.Timer -> {
                     TimerCountdown(notification = notification, color = Color(settings.timerColor))
@@ -346,94 +332,6 @@ private fun HotspotCollapsedRight(notification: IslandNotification?, settings: S
         fontSize = 11.sp,
         fontWeight = FontWeight.Bold
     )
-}
-
-@Composable
-internal fun BatteryCollapsedGlyph(notification: IslandNotification?, settings: SmartIslandSettings) {
-    val pctText = notification?.text?.replace("%", "")?.trim() ?: "49"
-    val pct = pctText.toFloatOrNull() ?: 49f
-    val progress = (pct / 100f).coerceIn(0f, 1f)
-    val title = notification?.title?.lowercase() ?: ""
-    val isBatterySaver = title.contains("saver") || notification?.category == "battery_saver"
-    val isLowBattery = title.contains("low") || notification?.category == "battery_low" || pct <= 20f
-
-    val batteryColor = when {
-        isLowBattery -> Color(0xFFEF4444)
-        isBatterySaver -> Color(0xFFF59E0B)
-        else -> Color(settings.batteryColor)
-    }
-
-    val infiniteTransition = rememberInfiniteTransition(label = "batteryPulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 0.9f,
-        targetValue = 1.15f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1000, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "batteryScale"
-    )
-
-    // Kept as a State, not a by-delegate Float. Passing the delegate value on
-    // forced a recomposition of this whole glyph 60x/second; passing the State
-    // lets DottedRing read it in the draw phase instead.
-    val rotationAngle = infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 8000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "dottedRingRotation"
-    )
-
-    Box(
-        modifier = Modifier.size(24.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        DottedRing(
-            progress = progress,
-            rotationAngle = { rotationAngle.value },
-            modifier = Modifier.size(22.dp),
-            color = batteryColor
-        )
-        when {
-            isBatterySaver -> {
-                Icon(
-                    Icons.Rounded.BatterySaver,
-                    contentDescription = "Battery Saver",
-                    tint = batteryColor,
-                    modifier = Modifier.size(14.dp)
-                )
-            }
-            isLowBattery -> {
-                Icon(
-                    Icons.Rounded.BatteryAlert,
-                    contentDescription = "Low Battery",
-                    tint = batteryColor,
-                    modifier = Modifier
-                        .size(14.dp)
-                        .graphicsLayer {
-                            scaleX = pulseScale
-                            scaleY = pulseScale
-                        }
-                )
-            }
-            else -> {
-                Icon(
-                    Icons.Rounded.Bolt,
-                    contentDescription = "Charging",
-                    tint = batteryColor,
-                    modifier = Modifier
-                        .size(14.dp)
-                        .graphicsLayer {
-                            scaleX = pulseScale
-                            scaleY = pulseScale
-                        }
-                )
-            }
-        }
-    }
 }
 
 @Composable

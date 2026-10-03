@@ -49,8 +49,7 @@ class IslandViewModel(
         settings
     ) { list, fgPkg, s ->
         list.filterNot { notif ->
-            (!s.enableBatteryMode && notif.mode == IslandMode.Battery) ||
-            (!fgPkg.isNullOrEmpty() && notif.mode == IslandMode.Music && notif.packageName == fgPkg)
+            !fgPkg.isNullOrEmpty() && notif.mode == IslandMode.Music && notif.packageName == fgPkg
         }
     }.stateIn(
         scope = viewModelScope,

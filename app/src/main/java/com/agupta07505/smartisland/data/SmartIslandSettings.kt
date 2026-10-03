@@ -19,7 +19,6 @@ data class SmartIslandSettings(
     val cornerRadius: Float = 22f,
     val opacity: Float = 1f,
     val pillColor: Long = 0xFF000000L,
-    val batteryColor: Long = 0xFF10B981L,
     val notificationDotColor: Long = 0xFF2563EBL,
     val musicVisualizerColor: Long = 0xFFFF6B9AL,
     val hotspotColor: Long = 0xFFF59E0BL,
@@ -35,6 +34,22 @@ data class SmartIslandSettings(
     val enableAppShortcuts: Boolean = true,
     val shortcutPackages: Set<String> = emptySet(),
     val showRecentApps: Boolean = false,
+    /**
+     * When true, only apps in [liveActivityPackages] are promoted into the
+     * island; everything else stays a normal system notification.
+     *
+     * This is the iOS model. A Dynamic Island is a glanceable surface for a
+     * small number of *ongoing* activities, not a second notification shade.
+     * Smart Island originally mirrored every notification into the island and
+     * suppressed it from the shade, which turned a status surface into an
+     * inbox. With music playing and an unrelated notification arriving, the
+     * notification should appear normally and leave the island to the music.
+     *
+     * Incoming calls are always allowed regardless of this flag.
+     */
+    val liveActivityAppsOnly: Boolean = true,
+    /** Packages eligible for the island when [liveActivityAppsOnly] is true. */
+    val liveActivityPackages: Set<String> = DEFAULT_LIVE_ACTIVITY_PACKAGES,
     val welcomeDialogShown: Boolean = false,
     val showOnLockScreen: Boolean = false,
     val lockScreenPrivacy: String = LOCK_SCREEN_APP_ICON_ONLY,
@@ -48,6 +63,17 @@ data class SmartIslandSettings(
     val autoHidePill: Boolean = false,
     val autoHideTimeoutSeconds: Int = 5,
     val showInLandscape: Boolean = false,
+    /**
+     * Make the collapsed pill's corner radius follow the display's own corner
+     * radius, read from `WindowInsets.getRoundedCorner`.
+     *
+     * The HIG specifies that the Dynamic Island's rounded corner "matches the
+     * camera", i.e. it is continuous with the screen's curvature rather than a
+     * fixed value. A hardcoded radius looks subtly wrong on a device whose
+     * corners are a different shape. Turn this off to use [cornerRadius]
+     * verbatim instead.
+     */
+    val matchDisplayCorners: Boolean = true,
     val autoExpandOnNotification: Boolean = true,
     val enableShadow: Boolean = true,
     val shadowElevation: Float = 14f,
@@ -58,7 +84,6 @@ data class SmartIslandSettings(
     val enableNotificationHistory: Boolean = false,
     val notificationHistoryRetentionHours: Int = 72,
     val showBluetoothBattery: Boolean = true,
-    val enableBatteryMode: Boolean = true,
     val enableNotificationCooldown: Boolean = false,
     val notificationCooldownDurationMinutes: Int = 3,
     val notificationCooldownThreshold: Int = 3,
@@ -97,7 +122,6 @@ data class SmartIslandSettings(
         settingsObj.put("cornerRadius", cornerRadius.toDouble())
         settingsObj.put("opacity", opacity.toDouble())
         settingsObj.put("pillColor", pillColor)
-        settingsObj.put("batteryColor", batteryColor)
         settingsObj.put("notificationDotColor", notificationDotColor)
         settingsObj.put("musicVisualizerColor", musicVisualizerColor)
         settingsObj.put("hotspotColor", hotspotColor)
@@ -117,6 +141,12 @@ data class SmartIslandSettings(
         settingsObj.put("shortcutPackages", shortcutsArray)
 
         settingsObj.put("showRecentApps", showRecentApps)
+        settingsObj.put("liveActivityAppsOnly", liveActivityAppsOnly)
+
+        val liveActivityArray = JSONArray()
+        liveActivityPackages.forEach { liveActivityArray.put(it) }
+        settingsObj.put("liveActivityPackages", liveActivityArray)
+
         settingsObj.put("welcomeDialogShown", welcomeDialogShown)
         settingsObj.put("showOnLockScreen", showOnLockScreen)
         settingsObj.put("lockScreenPrivacy", lockScreenPrivacy)
@@ -137,6 +167,7 @@ data class SmartIslandSettings(
         settingsObj.put("autoHidePill", autoHidePill)
         settingsObj.put("autoHideTimeoutSeconds", autoHideTimeoutSeconds)
         settingsObj.put("showInLandscape", showInLandscape)
+        settingsObj.put("matchDisplayCorners", matchDisplayCorners)
         settingsObj.put("autoExpandOnNotification", autoExpandOnNotification)
         settingsObj.put("enableShadow", enableShadow)
         settingsObj.put("shadowElevation", shadowElevation.toDouble())
@@ -147,7 +178,6 @@ data class SmartIslandSettings(
         settingsObj.put("enableNotificationHistory", enableNotificationHistory)
         settingsObj.put("notificationHistoryRetentionHours", notificationHistoryRetentionHours)
         settingsObj.put("showBluetoothBattery", showBluetoothBattery)
-        settingsObj.put("enableBatteryMode", enableBatteryMode)
         settingsObj.put("enableNotificationCooldown", enableNotificationCooldown)
         settingsObj.put("notificationCooldownDurationMinutes", notificationCooldownDurationMinutes)
         settingsObj.put("notificationCooldownThreshold", notificationCooldownThreshold)
@@ -197,6 +227,26 @@ data class SmartIslandSettings(
          */
         const val LOCK_SCREEN_APP_ICON_ONLY = "AppIconOnly"
         const val LOCK_SCREEN_FULL_CONTENT = "FullContent"
+
+        /**
+         * Packages eligible for the island by default.
+         *
+         * Deliberately short. The Dynamic Island on iOS shows a small number of
+         * genuinely *ongoing* activities — media playback, navigation, a call, a
+         * timer, a delivery. Everything else is a banner, not an island.
+         *
+         * This is a starting point the user edits in Settings, not a hardcoded
+         * policy.
+         */
+        val DEFAULT_LIVE_ACTIVITY_PACKAGES: Set<String> = setOf(
+            "com.spotify.music",   // media playback
+            "com.dodopizza.app",   // order tracking
+            "com.google.android.dialer", // outgoing calls
+            "com.android.server.telecom", // call service
+            "com.samsung.android.dialer",
+            "com.oneplus.contacts",
+            "com.android.incallui"
+        )
 
         val Default = SmartIslandSettings()
 
@@ -272,7 +322,6 @@ data class SmartIslandSettings(
                 cornerRadius = safeFloat("cornerRadius", defaults.cornerRadius, MIN_CORNER_RADIUS, MAX_CORNER_RADIUS),
                 opacity = safeFloat("opacity", defaults.opacity, MIN_OPACITY, MAX_OPACITY),
                 pillColor = safeColor("pillColor", defaults.pillColor),
-                batteryColor = safeColor("batteryColor", defaults.batteryColor),
                 notificationDotColor = safeColor("notificationDotColor", defaults.notificationDotColor),
                 musicVisualizerColor = safeColor("musicVisualizerColor", defaults.musicVisualizerColor),
                 hotspotColor = safeColor("hotspotColor", defaults.hotspotColor),
@@ -288,6 +337,12 @@ data class SmartIslandSettings(
                 enableAppShortcuts = obj.optBoolean("enableAppShortcuts", defaults.enableAppShortcuts),
                 shortcutPackages = safeStringSet("shortcutPackages", defaults.shortcutPackages, 8),
                 showRecentApps = obj.optBoolean("showRecentApps", defaults.showRecentApps),
+                liveActivityAppsOnly = obj.optBoolean("liveActivityAppsOnly", defaults.liveActivityAppsOnly),
+                liveActivityPackages = safeStringSet(
+                    "liveActivityPackages",
+                    defaults.liveActivityPackages,
+                    64
+                ),
                 welcomeDialogShown = obj.optBoolean("welcomeDialogShown", defaults.welcomeDialogShown),
                 showOnLockScreen = obj.optBoolean("showOnLockScreen", defaults.showOnLockScreen),
                 lockScreenPrivacy = obj.optString("lockScreenPrivacy", defaults.lockScreenPrivacy).let {
@@ -303,6 +358,7 @@ data class SmartIslandSettings(
                 autoHidePill = obj.optBoolean("autoHidePill", defaults.autoHidePill),
                 autoHideTimeoutSeconds = obj.optInt("autoHideTimeoutSeconds", defaults.autoHideTimeoutSeconds).coerceIn(1, 120),
                 showInLandscape = obj.optBoolean("showInLandscape", defaults.showInLandscape),
+                matchDisplayCorners = obj.optBoolean("matchDisplayCorners", defaults.matchDisplayCorners),
                 autoExpandOnNotification = obj.optBoolean("autoExpandOnNotification", defaults.autoExpandOnNotification),
                 enableShadow = obj.optBoolean("enableShadow", defaults.enableShadow),
                 shadowElevation = safeFloat("shadowElevation", defaults.shadowElevation, MIN_SHADOW_ELEVATION, MAX_SHADOW_ELEVATION),
@@ -313,7 +369,6 @@ data class SmartIslandSettings(
                 enableNotificationHistory = obj.optBoolean("enableNotificationHistory", defaults.enableNotificationHistory),
                 notificationHistoryRetentionHours = obj.optInt("notificationHistoryRetentionHours", defaults.notificationHistoryRetentionHours).coerceIn(1, 720),
                 showBluetoothBattery = obj.optBoolean("showBluetoothBattery", defaults.showBluetoothBattery),
-                enableBatteryMode = obj.optBoolean("enableBatteryMode", defaults.enableBatteryMode),
                 enableNotificationCooldown = obj.optBoolean("enableNotificationCooldown", defaults.enableNotificationCooldown),
                 notificationCooldownDurationMinutes = obj.optInt("notificationCooldownDurationMinutes", defaults.notificationCooldownDurationMinutes).coerceIn(1, 60),
                 notificationCooldownThreshold = obj.optInt("notificationCooldownThreshold", defaults.notificationCooldownThreshold).coerceIn(2, 20),

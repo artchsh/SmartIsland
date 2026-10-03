@@ -51,10 +51,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.agupta07505.smartisland.model.IslandMode
 import com.agupta07505.smartisland.model.IslandNotification
-import com.agupta07505.smartisland.ui.MAX_EXPANDED_HEIGHT_DP
-import com.agupta07505.smartisland.ui.MIN_EXPANDED_HEIGHT_DP
+
+
 import com.agupta07505.smartisland.data.SmartIslandSettings
 import com.agupta07505.smartisland.data.LaunchableApp
+import com.agupta07505.smartisland.ui.accentColorFor
+import com.agupta07505.smartisland.ui.presentationFor
 import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.ui.res.stringResource
 import com.agupta07505.smartisland.R
@@ -166,23 +168,17 @@ fun IslandExpandedContent(
         val offsetFraction = pagerState.currentPageOffsetFraction
         val currentNotification = notifications.getOrNull(currentPage)
 
-        fun clampHeightForMode(notif: IslandNotification?, height: Dp): Dp {
-            return when (notif?.mode) {
-                IslandMode.Battery, IslandMode.IncomingCall -> height.coerceIn(72.dp, 125.dp)
-                IslandMode.Notification -> height.coerceIn(95.dp, 145.dp)
-                IslandMode.Music -> height.coerceIn(115.dp, 180.dp)
-                IslandMode.LiveActivity -> height.coerceIn(140.dp, 205.dp)
-                IslandMode.Navigation -> height.coerceIn(135.dp, 195.dp)
-                IslandMode.DownloadUpload -> height.coerceIn(120.dp, 195.dp)
-                IslandMode.Hotspot -> height.coerceIn(120.dp, 195.dp)
-                IslandMode.Bluetooth -> height.coerceIn(72.dp, 130.dp)
-                IslandMode.Flashlight -> height.coerceIn(72.dp, 130.dp)
-                IslandMode.ScreenRecording -> height.coerceIn(72.dp, 130.dp)
-                IslandMode.Timer -> height.coerceIn(72.dp, 130.dp)
-                IslandMode.Stopwatch -> height.coerceIn(72.dp, 130.dp)
-                else -> height.coerceIn(80.dp, 160.dp)
-            }
-        }
+        /**
+         * Clamps a measured page height into the HIG's expanded range.
+         *
+         * This previously had per-mode ranges that both exceeded the HIG ceiling
+         * (LiveActivity was allowed up to 205dp) and disagreed with
+         * `defaultEstimatedHeightForMode`, which estimated LiveActivity at 180dp
+         * while the clamp permitted 140-205dp — so the estimate could never be a
+         * meaningful fallback. One range now comes from the presentation registry.
+         */
+        fun clampHeightForMode(notif: IslandNotification?, height: Dp): Dp =
+            presentationFor(notif?.mode).clampHeight(height)
 
         val currentPageHeightRaw = currentNotification?.let { pageHeights[it.key] }
         val currentPageHeight = currentPageHeightRaw?.let { clampHeightForMode(currentNotification, it) }
@@ -201,7 +197,11 @@ fun IslandExpandedContent(
             val nextHeight = (nextHeightRaw?.let { clampHeightForMode(nextNotification, it) }
                 ?: com.agupta07505.smartisland.ui.defaultEstimatedHeightForMode(nextNotification?.mode))
             val fraction = kotlin.math.abs(offsetFraction)
-            (currentPageHeight + (nextHeight - currentPageHeight) * fraction).coerceIn(72.dp, 205.dp)
+            // Interpolating between two already-clamped heights can never leave
+            // the HIG range, so no further coercion is needed here. The previous
+            // `.coerceIn(72.dp, 205.dp)` was the last remaining place the old,
+            // HIG-violating ceiling survived.
+            currentPageHeight + (nextHeight - currentPageHeight) * fraction
         }
 
         LaunchedEffect(targetHeight) {
@@ -211,7 +211,7 @@ fun IslandExpandedContent(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(targetHeight)
+                .height(presentationFor(currentNotification?.mode).clampHeight(targetHeight))
         ) {
             HorizontalPager(
                 state = pagerState,
@@ -234,10 +234,7 @@ fun IslandExpandedContent(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(targetHeight.coerceIn(
-                                MIN_EXPANDED_HEIGHT_DP.dp,
-                                MAX_EXPANDED_HEIGHT_DP.dp
-                            ))
+                            .height(presentationFor(notification.mode).clampHeight(targetHeight))
                             .verticalScroll(pageScroll)
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
@@ -284,11 +281,6 @@ fun IslandExpandedContent(
                                 settings = settings
                             )
                             IslandMode.Music -> MusicExpanded(
-                                notification = notification,
-                                bottomPadding = bottomPadding,
-                                settings = settings
-                            )
-                            IslandMode.Battery -> BatteryExpanded(
                                 notification = notification,
                                 bottomPadding = bottomPadding,
                                 settings = settings
@@ -476,20 +468,11 @@ private fun NotificationBackdrop(
         } else null
     }
 
-    val accentColor = when (notification.mode) {
-        IslandMode.Battery -> Color(settings.batteryColor)
-        IslandMode.IncomingCall -> Color(settings.callColor)
-        IslandMode.LiveActivity -> Color(settings.liveActivityColor)
-        IslandMode.Navigation -> Color(settings.navigationColor)
-        IslandMode.DownloadUpload -> Color(settings.transferColor)
-        IslandMode.Hotspot -> Color(settings.hotspotColor)
-        IslandMode.Bluetooth -> Color(settings.bluetoothColor)
-        IslandMode.Flashlight -> Color(settings.flashlightColor)
-        IslandMode.ScreenRecording -> Color(settings.screenRecordingColor)
-        IslandMode.Timer -> Color(settings.timerColor)
-        IslandMode.Stopwatch -> Color(settings.stopwatchColor)
-        else -> Color(settings.notificationDotColor)
-    }
+    // Single resolver for every mode's accent colour. This was previously a
+    // second hand-maintained `when`, which is how the collapsed Navigation slot
+    // ended up reading liveActivityColor while the expanded layer read
+    // navigationColor. AUDIT.md section 5.12.
+    val accentColor = accentColorFor(notification.mode, settings)
 
     Box(modifier = modifier) {
         if (imageBitmap != null) {
@@ -519,27 +502,46 @@ private fun NotificationBackdrop(
                     .background(
                         Brush.radialGradient(
                             colors = listOf(
-                                accentColor.copy(alpha = 0.22f),
+                                // Restrained for the same reason as the no-artwork
+                                // case: the artwork already supplies the colour, so a
+                                // heavy accent wash on top only muddies it.
+                                accentColor.copy(alpha = 0.12f),
                                 Color.Transparent
                             ),
                             center = Offset(0f, 0f),
-                            radius = 700f
+                            radius = 320f
                         )
                     )
             )
         } else {
+            // iOS: the expanded Live Activity card is black. The accent colour
+            // appears in the glyphs, progress rings and small highlights — not as
+            // a wash across the whole surface.
+            //
+            // This previously applied accentColor at 35% alpha over a 750px radius
+            // from the top-leading corner, which on a 421x~100dp card covered the
+            // entire surface. The battery card rendered as a solid green block.
+            //
+            // The accent is now a restrained corner glow behind the leading glyph,
+            // roughly a fifth of the previous strength and a third of the radius,
+            // over a near-black base.
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(Color(0xFF0A0A0C))
+            )
             Box(
                 modifier = Modifier
                     .matchParentSize()
                     .background(
                         Brush.radialGradient(
                             colors = listOf(
-                                accentColor.copy(alpha = 0.35f),
-                                accentColor.copy(alpha = 0.12f),
+                                accentColor.copy(alpha = 0.16f),
+                                accentColor.copy(alpha = 0.05f),
                                 Color.Transparent
                             ),
                             center = Offset(0f, 0f),
-                            radius = 750f
+                            radius = 260f
                         )
                     )
             )
@@ -550,7 +552,7 @@ private fun NotificationBackdrop(
                         Brush.verticalGradient(
                             listOf(
                                 Color.Transparent,
-                                Color.Black.copy(alpha = 0.65f)
+                                Color.Black.copy(alpha = 0.45f)
                             )
                         )
                     )

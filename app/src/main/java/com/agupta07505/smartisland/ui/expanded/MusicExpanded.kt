@@ -448,7 +448,10 @@ fun MusicExpanded(
                         }
                     }
                 },
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                // Announced by TalkBack; without it the bar reports only a bare
+                // percentage with no indication of what it controls.
+                progressLabel = notification?.title?.let { "$it playback position" }
             )
             Text(formatDuration(durationMs), color = Color.White, fontSize = 10.sp)
         }
