@@ -9,6 +9,8 @@ package com.agupta07505.smartisland
 
 import com.agupta07505.smartisland.ui.CompactNotificationShape
 import com.agupta07505.smartisland.ui.calculateCollapsedLayout
+import com.agupta07505.smartisland.ui.calculateExpandedTopOffset
+import com.agupta07505.smartisland.ui.calculateExpandedWidth
 import com.agupta07505.smartisland.ui.compactNotificationShapes
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -203,95 +205,138 @@ class IslandOverlayLayoutTest {
         assertEquals(screenCenterDp, pillCenter, 0.01f)
     }
 
+    /**
+     * iOS geometry: the expanded card is inset from the screen edges by a fixed
+     * margin, equal on top, left and right.
+     *
+     * The previous implementation used `screenWidthDp * 0.95`, which is a ratio
+     * rather than the HIG's fixed inset, so the horizontal inset did not match
+     * the vertical one and the card's top edge did not line up with the pill's.
+     * See REDESIGN.md section 3.2.
+     */
     @Test
-    fun landscapeExpandedWidthIsFixedAndDoesNotFillLandscapeScreenWidth() {
-        val landscapeScreenWidth = 914f
-        val landscapeScreenHeight = 411f
+    fun expandedWidthIsTheScreenMinusEqualSideMargins() {
+        val margin = 12f
+        val widthDp = 445f // Nothing Phone (4a): 1224px / 2.75
 
-        val portraitExpandedWidth = com.agupta07505.smartisland.ui.calculateExpandedWidth(
-            isLandscape = false,
-            screenWidthDp = landscapeScreenHeight, // 411dp in portrait
-            screenHeightDp = landscapeScreenWidth  // 914dp in portrait
+        assertEquals(
+            widthDp - 2f * margin,
+            calculateExpandedWidth(
+                isLandscape = false,
+                screenWidthDp = widthDp,
+                screenHeightDp = 989f
+            ),
+            0.01f
         )
-        val landscapeExpandedWidth = com.agupta07505.smartisland.ui.calculateExpandedWidth(
+    }
+
+    /**
+     * The card must be inset identically on the top and on the sides. This is the
+     * property that makes the morph start from zero displacement: the pill's
+     * default y offset is the same value, so the card's top edge lands exactly on
+     * the pill's top edge.
+     */
+    @Test
+    fun expandedTopOffsetEqualsTheSideMargin() {
+        val margin = 12f
+        val widthDp = 445f
+        val cardWidth = calculateExpandedWidth(false, widthDp, 989f)
+        val sideInset = (widthDp - cardWidth) / 2f
+        val topInset = calculateExpandedTopOffset(
+            enableNotchMode = false,
+            hasCompanion = false,
+            statusBarHeightDp = 24f
+        )
+
+        assertEquals(
+            "Top and side insets must match so the morph has no vertical jump",
+            sideInset,
+            topInset,
+            0.01f
+        )
+        assertEquals(margin, topInset, 0.01f)
+    }
+
+    /**
+     * The old behaviour returned `maxOf(statusBarHeightDp, circleSizeDp +
+     * compactGapDp)` = 42dp against a pill at 12dp. That 30dp downward jump is
+     * exactly what made the expansion read as a separate panel appearing below the
+     * pill. Guard against regressing to it.
+     */
+    @Test
+    fun expandedTopOffsetDoesNotDropBelowThePillForTallStatusBarsOrCompanions() {
+        val pillTopDp = 12f
+        for (statusBar in listOf(24f, 40f, 56f)) {
+            for (hasCompanion in listOf(true, false)) {
+                val offset = calculateExpandedTopOffset(
+                    enableNotchMode = false,
+                    hasCompanion = hasCompanion,
+                    statusBarHeightDp = statusBar,
+                    circleSizeDp = 34f,
+                    compactGapDp = 8f
+                )
+                assertEquals(
+                    "Card top must not depend on status bar height or companion (statusBar=$statusBar, companion=$hasCompanion)",
+                    pillTopDp,
+                    offset,
+                    0.01f
+                )
+            }
+        }
+    }
+
+    /**
+     * Notch mode is docked to the top edge but must still clear the hardware
+     * cutout, so it keeps its own behaviour.
+     */
+    @Test
+    fun notchModeClearsTheHardwareCutout() {
+        val notchHeight = 35f
+        val offset = calculateExpandedTopOffset(
+            enableNotchMode = true,
+            hasCompanion = false,
+            statusBarHeightDp = 24f,
+            notchHeightDp = notchHeight
+        )
+        org.junit.Assert.assertTrue(
+            "Notch-mode offset ($offset) must clear the cutout ($notchHeight)",
+            offset >= notchHeight
+        )
+        assertEquals(notchHeight, offset, 0.01f)
+    }
+
+    /**
+     * Landscape uses the narrower dimension, and the result must stay usable on a
+     * very short screen rather than collapsing.
+     */
+    @Test
+    fun landscapeUsesTheNarrowerDimensionAndStaysUsable() {
+        val landscapeWidth = 989f
+        val landscapeHeight = 445f
+
+        assertEquals(
+            landscapeHeight - 2f * 12f,
+            calculateExpandedWidth(
+                isLandscape = true,
+                screenWidthDp = landscapeWidth,
+                screenHeightDp = landscapeHeight
+            ),
+            0.01f
+        )
+
+        val tiny = calculateExpandedWidth(
             isLandscape = true,
-            screenWidthDp = landscapeScreenWidth,  // 914dp in landscape
-            screenHeightDp = landscapeScreenHeight // 411dp in landscape
+            screenWidthDp = 320f,
+            screenHeightDp = 240f
         )
-
-        // The landscape expanded width must equal the portrait compact width, NOT 95% of 914dp
-        assertEquals(portraitExpandedWidth, landscapeExpandedWidth, 0.01f)
-        org.junit.Assert.assertTrue(landscapeExpandedWidth < 450f)
-        org.junit.Assert.assertTrue(landscapeExpandedWidth < landscapeScreenWidth * 0.95f)
-
-        // Clamping bounds for tablets / ultra-wides
-        val tabletLandscapeWidth = com.agupta07505.smartisland.ui.calculateExpandedWidth(
-            isLandscape = true,
-            screenWidthDp = 1280f,
-            screenHeightDp = 800f
-        )
-        assertEquals(440f, tabletLandscapeWidth, 0.01f)
-
-        val smallLandscapeWidth = com.agupta07505.smartisland.ui.calculateExpandedWidth(
-            isLandscape = true,
-            screenWidthDp = 640f,
-            screenHeightDp = 320f
-        )
-        assertEquals(340f, smallLandscapeWidth, 0.01f)
+        org.junit.Assert.assertTrue("Card must never collapse below the floor", tiny >= 260f)
     }
 
     @Test
-    fun notchModeExpandedTopOffsetClearsHardwareNotchAndStatusBar() {
-        val notchHeight = 35f
-        val statusBarHeightStandard = 24f
-        val statusBarHeightTall = 40f
-
-        // Notch mode: MUST clear both the hardware notch height and status bar height with a safe gap
-        val offsetStandard = com.agupta07505.smartisland.ui.calculateExpandedTopOffset(
-            enableNotchMode = true,
-            hasCompanion = false,
-            statusBarHeightDp = statusBarHeightStandard,
-            notchHeightDp = notchHeight
-        )
-        org.junit.Assert.assertTrue(
-            "Expanded offset in notch mode ($offsetStandard) must strictly exceed notch height ($notchHeight)",
-            offsetStandard >= notchHeight + 8f
-        )
-        org.junit.Assert.assertTrue(
-            "Expanded offset in notch mode ($offsetStandard) must strictly exceed status bar ($statusBarHeightStandard)",
-            offsetStandard >= statusBarHeightStandard + 8f
-        )
-        assertEquals(43f, offsetStandard, 0.01f)
-
-        // Tall notch device (e.g., Pixel 3 XL or iPhone deep notch)
-        val offsetTall = com.agupta07505.smartisland.ui.calculateExpandedTopOffset(
-            enableNotchMode = true,
-            hasCompanion = false,
-            statusBarHeightDp = statusBarHeightTall,
-            notchHeightDp = notchHeight
-        )
-        org.junit.Assert.assertTrue(
-            "Expanded offset on tall status bar ($offsetTall) must clear tall status bar ($statusBarHeightTall)",
-            offsetTall >= statusBarHeightTall + 8f
-        )
-        assertEquals(48f, offsetTall, 0.01f)
-
-        // Non-notch mode preserves standard status bar positioning
-        val normalOffset = com.agupta07505.smartisland.ui.calculateExpandedTopOffset(
-            enableNotchMode = false,
-            hasCompanion = false,
-            statusBarHeightDp = statusBarHeightStandard
-        )
-        assertEquals(statusBarHeightStandard, normalOffset, 0.01f)
-
-        val companionOffset = com.agupta07505.smartisland.ui.calculateExpandedTopOffset(
-            enableNotchMode = false,
-            hasCompanion = true,
-            statusBarHeightDp = statusBarHeightStandard,
-            circleSizeDp = 34f,
-            compactGapDp = 8f
-        )
-        assertEquals(42f, companionOffset, 0.01f)
+    fun portraitAndLandscapeAgreeOnTheSameLogicalScreen() {
+        val portraitWidth = calculateExpandedWidth(false, 445f, 989f)
+        val landscapeWidth = calculateExpandedWidth(true, 989f, 445f)
+        assertEquals(portraitWidth, landscapeWidth, 0.01f)
     }
 
     @Test

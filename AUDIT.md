@@ -807,7 +807,7 @@ Phone (4a):
 
 ## 5. UI and interaction
 
-### 5.1 OPEN — one tap fires two conflicting actions
+### 5.1 FIXED — one tap fired two conflicting actions
 
 `IslandOverlayView.kt:395-408` (outer `detectTapGestures`, expanded only) is an
 **ancestor** of the raw gesture loop at `:479-792`. The inner loop uses
@@ -819,7 +819,7 @@ Tapping the expanded pill body runs **both** `currentOnOpenNotification` and
 `SmartIslandOverlayService.kt:523` shows the intent was outside-taps-only, but
 there is no hit-test exclusion.
 
-### 5.2 OPEN — horizontal drag in the expanded card fires the tap action
+### 5.2 FIXED — horizontal drag in the expanded card fired the tap action
 
 `IslandOverlayView.kt:547` guards on `abs(dragOffset) < 10f * density`, but
 `dragOffset` accumulates **vertical** movement only. A purely horizontal 60dp drag
@@ -827,23 +827,41 @@ leaves `dragOffset ≈ 0`, passes the guard, and opens the app. There is no
 horizontal gesture handling in the expanded state at all, despite the README
 documenting "Swipe Left / Right: Switch Stack".
 
-### 5.3 OPEN — stale captures inside `pointerInput(Unit)`
+### 5.3 PARTIALLY FIXED — stale captures inside `pointerInput`
 
-Nine callbacks are correctly wrapped in `rememberUpdatedState`, but three plain
-parameters are read directly from a never-restarted coroutine:
+Nine callbacks are correctly wrapped in `rememberUpdatedState`, but some plain
+parameters were read directly from a coroutine that never restarts.
 
-- `isInputActive` at `:400` — the "don't collapse while replying" guard uses a
-  stale value, so the island can collapse mid-typing.
-- `settings.autoHidePill` at `:426` and `:638` — a stale settings snapshot, even
-  though the same block uses `currentSettings` a few lines later.
+**Corrected:** the audit previously claimed `isInputActive` was stale at the
+gesture guard. That was wrong. `isInputActive` is a **key** of that
+`.pointerInput(...)` block, so the block is cancelled and restarted when it
+changes and the captured value is current. The real consequence of keying on it is
+the opposite problem — an in-flight gesture is cancelled whenever the reply field
+opens or closes — which is what motivated moving the hold job into the
+pointer-input scope (see 5.4).
 
-### 5.4 OPEN — hold-gesture job leaks out of the gesture scope
+**Genuinely stale, now fixed:** `settings.autoHidePill` and
+`settings.enableAppShortcuts` were read directly inside a
+`.pointerInput(Unit)` block in the auto-hidden pill's tap target, which never
+restarts, so they captured whatever was current at first composition. Both now
+read `currentSettings`.
 
-`IslandOverlayView.kt:492-496` launches the 300ms hold job in the **composition**
-scope rather than the pointerInput scope. If the pointer-input coroutine is
-cancelled mid-gesture, the job survives and produces a spurious haptic pulse after
-an aborted gesture. Pointer cancellation (`changedToCancelIgnoreConsumed`) is
-never handled at all.
+### 5.4 FIXED — hold gesture job no longer outlives the gesture
+
+`IslandOverlayView` launched the 300ms hold-detection job in the **composition**
+scope (`rememberCoroutineScope`), not the pointer-input scope, so if the
+pointer-input coroutine was cancelled mid-gesture the job survived and produced a
+spurious haptic pulse after the user had already lifted their finger.
+
+Now wrapped in `coroutineScope { }` inside the `pointerInput` block, making the
+job a child of that block and therefore cancelled with it.
+
+### 5.6 FIXED — gesture cancellation is now handled
+
+Compose has no public "pointer cancel" event type; a pointer that stops being
+pressed without producing an up event is how cancellation surfaces. The gesture
+loop only tested `changedToUp()`, so a stolen gesture still ran the entire
+up-branch and fired a tap action for something the user never completed.
 
 ### 5.5 OPEN — divergent idle-hide predicates
 
@@ -854,26 +872,26 @@ With `hideWhenIdle` on and app shortcuts enabled, Compose animates the pill to
 zero size while the window stays `VISIBLE` and touchable, leaving an invisible
 34dp-tall tappable strip on the status bar.
 
-### 5.6 OPEN — dead settings
+### 5.7 OPEN — dead settings
 
 `swipeDownCollapsedAction` and `swipeHorizontalCollapsedAction` are persisted,
 backed up, restored and offered in the UI, but **never read**. Only `pillSwipe*`
 is wired.
 
-### 5.7 OPEN — two colliding `AUTO_COLLAPSE_DELAY_MS` constants
+### 5.8 OPEN — two colliding `AUTO_COLLAPSE_DELAY_MS` constants
 
 `IslandViewModel.kt:214` = 5000ms (actually collapses);
 `SmartIslandOverlayService.kt:963` = 220ms (re-applies layout params). Same name,
 unrelated meanings.
 
-### 5.8 OPEN — duplicated gesture resolution
+### 5.9 OPEN — duplicated gesture resolution
 
 The entire four-way pill-swipe resolution block is written twice in
 `IslandOverlayView.kt` — once on finger-up (`:558-646`) and once in the mid-drag
 snappy path (`:676-756`), roughly 70 lines of copy-paste. The
 `executeSwipeAction` call itself is repeated ten times with identical arguments.
 
-### 5.9 OPEN — per-mode state is not hoisted, so the auto-collapse round-trip resets it
+### 5.10 OPEN — per-mode state is not hoisted, so the auto-collapse round-trip resets it
 
 `MusicExpanded`, `TimerExpanded`, `StopwatchExpanded` and `NotificationExpanded`
 all own transient state in local `remember` with no hoisting and no
@@ -881,7 +899,7 @@ all own transient state in local `remember` with no hoisting and no
 progress, like state and lap count. `HorizontalPager` also disposes off-screen
 pages, so swiping past the last notification and back re-creates the composable.
 
-### 5.10 OPEN — the mode-to-appearance mapping is duplicated seven ways
+### 5.11 OPEN — the mode-to-appearance mapping is duplicated seven ways
 
 Seven separate `when` blocks map `IslandMode` to presentation: two in
 `IslandCollapsedContent`, one in `IslandOverlayView` for the secondary bubble,
@@ -889,7 +907,7 @@ one in `IslandExpandedContent` for the card, plus backdrop accent, height estima
 and height clamp. Three of them end in `IslandMode.Empty -> Unit`, which
 **silently swallows** a new mode instead of failing the build.
 
-### 5.11 OPEN — colour bugs
+### 5.12 OPEN — colour bugs
 
 - **Navigation colour is ignored in the collapsed layer.**
   `IslandCollapsedContent.kt:661,709` uses `settings.liveActivityColor` for
@@ -906,7 +924,7 @@ and height clamp. Three of them end in `IslandMode.Empty -> Unit`, which
 - The 13 per-mode colours are resolved as `Color(settings.xColor)` at ~35 call
   sites with no `CompositionLocal` and no value class.
 
-### 5.12 OPEN — accessibility, beyond `bounceClick`
+### 5.13 OPEN — accessibility, beyond `bounceClick`
 
 `bounceClick` (§1.13) was the large one and is fixed. Remaining:
 
@@ -927,7 +945,7 @@ and height clamp. Three of them end in `IslandMode.Empty -> Unit`, which
 - `indication = null` on the page-level click, both bubbles and the seek bar means
   no ripple and no visual press feedback on those surfaces.
 
-### 5.13 OPEN — the overlay service is a leaky god object
+### 5.14 OPEN — the overlay service is a leaky god object
 
 `expanded`, `selectedIndex`, `isLocked`, `foregroundPackage` are exposed as public
 **mutable** `StateFlow`s and written directly by the service. The service also
@@ -1364,6 +1382,26 @@ icon on Android 13+. Hidden by the `MonochromeLauncherIcon` suppression.
 
 Recorded for the redesign discussion. **Nothing in this section is implemented
 yet** — it is here so the findings that constrain the redesign are not lost.
+
+### 11.0 Progress
+
+See [REDESIGN.md](REDESIGN.md) for the full specification. Implemented and verified
+on hardware so far:
+
+- Expanded card geometry switched to the HIG's fixed inset (equal top/side margin)
+  instead of a 95% width ratio, which removes the downward jump that made the
+  expansion read as a separate panel. §5.1's double-fire and §5.2's
+  horizontal-drag-fires-tap are fixed as part of the same gesture work.
+- Long-press now expands and a single tap now opens the source app, matching iOS.
+  Expansion fires while the finger is still down rather than on release.
+- Companion and tertiary bubbles now fade out as the card takes over, instead of
+  drawing on top of it.
+- §5.3, §5.4 and §5.6 fixed.
+
+Still outstanding: the 84–160dp height clamp, cross-fading the compact and
+expanded content inside the single shape rather than swapping them, the
+window-bounds animation described in REDESIGN.md section 4.3, and re-fitting the
+13 per-mode cards.
 
 ### 11.1 Target device characteristics
 

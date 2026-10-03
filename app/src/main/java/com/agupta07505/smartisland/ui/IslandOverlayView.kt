@@ -29,6 +29,7 @@ import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.positionChange
 import kotlin.math.abs
 import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.absoluteOffset
@@ -385,15 +386,34 @@ fun IslandOverlayView(
     )
 
     // Outer Box: Fills the entire WindowManager window bounds (which are padded for easy touch)
+    //
+    // Tap-outside-to-collapse must NOT fire for taps that land on the card.
+    //
+    // Previously this was a bare detectTapGestures that collapsed on any tap,
+    // while the card's own gesture loop deliberately does not consume its down
+    // event (it needs to coexist with the pager). So a single tap on the expanded
+    // card ran BOTH handlers: it opened the source app AND collapsed the island.
+    // See AUDIT.md section 5.1.
+    //
+    // The fix is an explicit hit test against the card's rect, rather than
+    // relying on event consumption between two competing detectors.
+    val cardHitPadding = 8f * displayMetrics.density
     val outerModifier = if (currentExpanded) {
         modifier
             .fillMaxSize()
-            .pointerInput(Unit) {
-                detectTapGestures {
-                    if (isInputActive) {
-                        onReplyStateChanged(false)
+            .pointerInput(expanded, isInputActive, expandedWidth, safeHeight, yOffset, configuration.screenWidthDp) {
+                detectTapGestures { offset ->
+                    val cardLeft = (configuration.screenWidthDp.dp / 2f - expandedWidth / 2f).toPx() - cardHitPadding
+                    val cardRight = (configuration.screenWidthDp.dp / 2f + expandedWidth / 2f).toPx() + cardHitPadding
+                    val cardTop = yOffset.toPx() - cardHitPadding
+                    val cardBottom = (yOffset + safeHeight).toPx() + cardHitPadding
+                    val insideCard = offset.x in cardLeft..cardRight && offset.y in cardTop..cardBottom
+                    if (!insideCard) {
+                        if (isInputActive) {
+                            onReplyStateChanged(false)
+                        }
+                        currentOnToggle()
                     }
-                    currentOnToggle()
                 }
             }
     } else {
@@ -416,11 +436,15 @@ fun IslandOverlayView(
                     }
                     .pointerInput(Unit) {
                         detectTapGestures {
-                            if (settings.autoHidePill && isAutoHidden) {
+                            // currentSettings, not settings: this block is keyed on
+                            // Unit so it never restarts, and a direct read of the
+                            // `settings` parameter captured whichever value was current
+                            // at first composition. See AUDIT.md section 5.3.
+                            if (currentSettings.autoHidePill && isAutoHidden) {
                                 // First tap on auto-hidden pill: awaken and reveal the pill
                                 isAutoHidden = false
                                 userInteractionTimestamp = System.currentTimeMillis()
-                            } else if (settings.enableAppShortcuts || currentNotifications.isNotEmpty()) {
+                            } else if (currentSettings.enableAppShortcuts || currentNotifications.isNotEmpty()) {
                                 // Empty notifications idle hiding: expand favorite shortcuts if enabled
                                 currentOnToggle()
                             }
@@ -470,7 +494,12 @@ fun IslandOverlayView(
                 .clip(mainShape)
                 .background(pillBackgroundColor.copy(alpha = settings.opacity))
                 .pointerInput(displayMetrics.density, isInputActive) {
-                    if (isInputActive) return@pointerInput
+                    // coroutineScope gives the gesture loop a CoroutineScope whose job
+                    // is a child of this pointerInput block, so the hold-detection job
+                    // below is cancelled when the block is cancelled. AwaitPointerEventScope
+                    // is not itself a CoroutineScope, which is why this wrapper is needed.
+                    coroutineScope {
+                    if (isInputActive) return@coroutineScope
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
                         userInteractionTimestamp = System.currentTimeMillis()
@@ -482,10 +511,22 @@ fun IslandOverlayView(
                         var isDragging = false
                         var pillGestureTriggered = false
 
-                        val holdJob = scope.launch {
+                        // Launched in the POINTER-INPUT scope, not the composition
+                        // scope (`scope`). Previously a cancelled gesture could leave
+                        // this job running and vibrate ~300ms after the finger was
+                        // gone, because nothing cancelled it when the pointer-input
+                        // coroutine itself was cancelled. See AUDIT.md section 5.4.
+                        val holdJob = launch {
                             kotlinx.coroutines.delay(HOLD_GESTURE_THRESHOLD_MS)
                             isHoldRegistered = true
                             triggerHapticVibration(context)
+                            // iOS expands on touch-and-hold, and it expands WHILE the
+                            // finger is still down rather than on release. Doing it
+                            // here rather than in the up-branch is what makes the
+                            // gesture feel responsive rather than laggy.
+                            if (!wasExpandedAtStart) {
+                                currentOnToggle()
+                            }
                         }
 
                         val pointerId = down.id
@@ -493,6 +534,20 @@ fun IslandOverlayView(
                         while (true) {
                             val event = awaitPointerEvent()
                             val change = event.changes.firstOrNull { it.id == pointerId } ?: break
+
+                            if (!change.pressed && !change.changedToUp()) {
+                                // Gesture cancellation. Compose has no public "cancel"
+                                // event type: a pointer that stops being pressed without
+                                // an up event is how cancellation surfaces (a parent
+                                // intercepted the gesture, the window lost focus, a
+                                // system dialog appeared).
+                                //
+                                // Previously this was never handled, so the up-branch
+                                // still ran and fired a tap action for a gesture the
+                                // user never actually completed. See AUDIT.md 5.6.
+                                holdJob.cancel()
+                                break
+                            }
 
                             if (change.changedToUp()) {
                                 change.consume()
@@ -537,7 +592,18 @@ fun IslandOverlayView(
                                             notificationsSize = currentNotifications.size,
                                             currentIndex = currentSelectedIndex
                                         )
-                                    } else if (!isDragging || abs(dragOffset) < 10f * displayMetrics.density) {
+                                    } else if (abs(dragAccumulatorY) < 10f * displayMetrics.density &&
+                                        abs(dragAccumulatorX) < 10f * displayMetrics.density
+                                    ) {
+                                        // Tap (or micro-drag) on the expanded card.
+                                        //
+                                        // Previously this guard was `!isDragging || ...`,
+                                        // but `isDragging` flips true on the first
+                                        // sub-pixel move, so it was effectively always
+                                        // false and the test collapsed to a vertical-only
+                                        // check. A purely horizontal 60dp drag therefore
+                                        // satisfied it and opened the app. Now both
+                                        // accumulators are tested. See AUDIT.md 5.2.
                                         if (!isHoldRegistered) {
                                             if (currentNotification != null) {
                                                 currentOnOpenNotification(currentNotification)
@@ -626,13 +692,32 @@ fun IslandOverlayView(
                                                 }
                                             }
                                         } else {
-                                            // Tap on collapsed pill: expands or reveals
+                                            // Tap on the collapsed pill.
+                                            //
+                                            // iOS mapping: a SINGLE TAP opens the source
+                                            // app; a touch-and-hold expands. Expansion
+                                            // already happened in holdJob above while the
+                                            // finger was down, so reaching here without a
+                                            // hold means this is a tap.
+                                            //
+                                            // This used to be the opposite (tap expanded),
+                                            // which is why Smart Island never felt like a
+                                            // Dynamic Island. See REDESIGN.md section 3.1.
                                             if (!isHoldRegistered) {
-                                                if (settings.autoHidePill && isAutoHidden) {
+                                                if (currentSettings.autoHidePill && isAutoHidden) {
+                                                    // Waking a hidden pill must not also launch
+                                                    // an app.
                                                     isAutoHidden = false
                                                     userInteractionTimestamp = System.currentTimeMillis()
-                                                } else if (currentNotifications.isNotEmpty() || currentSettings.enableAppShortcuts) {
-                                                    currentOnToggle()
+                                                } else {
+                                                    val currentNotification =
+                                                        currentNotifications.getOrNull(currentSelectedIndex)
+                                                    if (currentNotification != null) {
+                                                        currentOnOpenNotification(currentNotification)
+                                                    } else {
+                                                        SmartIslandRepositories.notificationRepository(context)
+                                                            .resetTimer()
+                                                    }
                                                 }
                                             }
                                         }
@@ -782,6 +867,7 @@ fun IslandOverlayView(
                             }
                         }
                     }
+                    }
                 },
             contentAlignment = Alignment.TopCenter
         ) {
@@ -840,7 +926,15 @@ fun IslandOverlayView(
 
         // Collapsed: secondary circle. Expanded with 2: the same item morphs
         // into a full-size pill. Expanded with 3+: it stays the circle on the right.
-        if (!settings.enableNotchMode && secondaryAlpha > 0f && secondaryNotification != null) {
+        //
+        // Faded out by expandedAlpha. These bubbles were previously gated only on
+        // `secondaryAlpha > 0f`, which is driven by isSplitMode and is independent
+        // of expansion. So they stayed at full opacity and drew ON TOP of the
+        // expanded card, which is a large part of why the expansion read as a
+        // separate popup panel sitting over the pill rather than the pill becoming
+        // the card. See REDESIGN.md section 4.1.
+        val collapsedBubbleAlpha = secondaryAlpha * (1f - expandedAlpha)
+        if (!settings.enableNotchMode && collapsedBubbleAlpha > 0.01f && secondaryNotification != null) {
             Box(
                 modifier = Modifier
                     .absoluteOffset {
@@ -852,7 +946,7 @@ fun IslandOverlayView(
                     .width(secondaryBubbleWidth)
                     .height(circleSize)
                     .graphicsLayer {
-                        alpha = secondaryAlpha
+                        alpha = collapsedBubbleAlpha
                         scaleX = secondaryScale * switchScaleAnim.value
                         scaleY = secondaryScale * switchScaleAnim.value
                     }
@@ -910,7 +1004,8 @@ fun IslandOverlayView(
             }
         }
 
-        if (!settings.enableNotchMode && tertiaryAlpha > 0f && tertiaryNotification != null) {
+        val collapsedTertiaryAlpha = tertiaryAlpha * (1f - expandedAlpha)
+        if (!settings.enableNotchMode && collapsedTertiaryAlpha > 0.01f && tertiaryNotification != null) {
             Box(
                 modifier = Modifier
                     .absoluteOffset {
@@ -922,7 +1017,7 @@ fun IslandOverlayView(
                     .width(miniPillWidth)
                     .height(circleSize)
                     .graphicsLayer {
-                        alpha = tertiaryAlpha
+                        alpha = collapsedTertiaryAlpha
                         scaleX = tertiaryScale * switchScaleAnim.value
                         scaleY = tertiaryScale * switchScaleAnim.value
                     }
@@ -1065,36 +1160,75 @@ private fun SecondaryBubbleContent(
 }
 
 // Animation specs
-internal const val EXPANDED_WIDTH_RATIO = 0.95f
+/**
+ * Inset applied to the expanded card on its top, left and right edges.
+ *
+ * Equal on all three sides is the point: it makes the card's top edge align with
+ * the collapsed pill's default position so the morph starts from zero
+ * displacement, instead of the card dropping down before it grows.
+ *
+ * 12dp matches the pill's default y offset (33px at 2.75 density on the Nothing
+ * Phone (4a)). The HIG's equivalent is 11pt, derived from 430 - 408 = 22.
+ * See REDESIGN.md section 3.2.
+ */
+internal const val EXPANDED_CARD_MARGIN_DP = 12f
 
+/** Floor so the card stays usable on very narrow screens. */
+internal const val MIN_EXPANDED_WIDTH_DP = 260f
+
+/**
+ * Width of the expanded card.
+ *
+ * iOS geometry: the Dynamic Island's expanded presentation is inset from the
+ * screen edges by a fixed margin rather than being a percentage of the screen.
+ * The HIG's own numbers are internally consistent at an 11pt inset
+ * (430 - 408 = 22, 393 - 371 = 22), so the margin is the portable constant and
+ * the width falls out of it.
+ *
+ * Previously this was `screenWidthDp * 0.95`, which on a 445dp screen produced a
+ * 423dp card only by coincidence of the ratio, and produced a card whose inset
+ * differed from the inset used on the vertical axis.
+ */
 internal fun calculateExpandedWidth(
     isLandscape: Boolean,
     screenWidthDp: Float,
     screenHeightDp: Float,
-    ratio: Float = EXPANDED_WIDTH_RATIO
+    marginDp: Float = EXPANDED_CARD_MARGIN_DP
 ): Float {
-    return if (isLandscape) {
-        val portraitWidth = minOf(screenWidthDp, screenHeightDp)
-        (portraitWidth * ratio).coerceIn(340f, 440f)
-    } else {
-        screenWidthDp * ratio
-    }
+    val effectiveWidth = if (isLandscape) minOf(screenWidthDp, screenHeightDp) else screenWidthDp
+    return (effectiveWidth - 2f * marginDp).coerceAtLeast(MIN_EXPANDED_WIDTH_DP)
 }
 
+/**
+ * Top offset of the expanded card.
+ *
+ * iOS geometry, and the single most important value for the morph: the card's top
+ * edge sits at the SAME margin as its left and right edges, so it aligns exactly
+ * with the collapsed pill's default position. The container therefore does not
+ * drop before it grows, and the expansion begins with zero vertical displacement.
+ *
+ * The previous implementation returned `maxOf(statusBarHeightDp,
+ * circleSizeDp + compactGapDp)`, which on this device is 42dp against a pill at
+ * 12dp. That 30dp downward jump is what made the expansion read as a separate
+ * panel appearing below the pill rather than the pill becoming the card.
+ *
+ * Notch mode still needs to clear the hardware cutout, so it retains its own
+ * behaviour.
+ */
 internal fun calculateExpandedTopOffset(
     enableNotchMode: Boolean,
     hasCompanion: Boolean,
     statusBarHeightDp: Float,
     notchHeightDp: Float = 35f,
     circleSizeDp: Float = 34f,
-    compactGapDp: Float = COMPACT_INDICATOR_GAP_DP
+    compactGapDp: Float = COMPACT_INDICATOR_GAP_DP,
+    marginDp: Float = EXPANDED_CARD_MARGIN_DP
 ): Float {
     return if (enableNotchMode) {
-        maxOf(statusBarHeightDp, notchHeightDp) + 8f
-    } else if (hasCompanion) {
-        maxOf(statusBarHeightDp, circleSizeDp + compactGapDp)
+        // Docked to the top edge, but must still clear the camera cutout.
+        maxOf(marginDp, notchHeightDp)
     } else {
-        statusBarHeightDp
+        marginDp
     }
 }
 
