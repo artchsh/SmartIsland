@@ -212,6 +212,20 @@ fun IslandOverlayView(
     }
     var expandedHeight by remember { mutableStateOf(initialEstimatedHeight) }
 
+    // A measurement that arrived while the transition was running, applied once
+    // it settles. See onHeightMeasured below.
+    var pendingMeasuredHeight by remember { mutableStateOf<Dp?>(null) }
+    val isTransitionSettled = transition.currentState == transition.targetState
+
+    LaunchedEffect(isTransitionSettled, pendingMeasuredHeight) {
+        val pending = pendingMeasuredHeight
+        if (isTransitionSettled && pending != null && pending != expandedHeight) {
+            android.util.Log.d(TAG, "expanded height ${expandedHeight.value} -> ${pending.value} (deferred)")
+            expandedHeight = pending
+        }
+        if (isTransitionSettled) pendingMeasuredHeight = null
+    }
+
     LaunchedEffect(activeMode, notifications.isEmpty()) {
         if (!expanded) {
             expandedHeight = if (notifications.isEmpty()) 135.dp else defaultEstimatedHeightForMode(activeMode)
@@ -435,7 +449,6 @@ fun IslandOverlayView(
         label = "tertiaryScale"
     )
 
-    val expandedCompactX = collapsedMainLeft
     val collapsedSecondaryOffset = if (isFullWidth) {
         circleCenter - screenCenter
     } else {
@@ -1015,14 +1028,31 @@ fun IslandOverlayView(
                         // Each mode owns its natural height, then the card is clamped to
                         // the HIG's 84-160dp range. Overflow stays reachable because
                         // IslandExpandedContent makes the page content scrollable when
-                        // it exceeds the ceiling. The launcher already supplies its own
-                        // loading height and must not impose that minimum on compact
-                        // call or battery content.
-                        onHeightMeasured = {
-                            expandedHeight = it.coerceIn(
+                        // it exceeds the ceiling.
+                        //
+                        // Measurements are DEFERRRED while the expand/collapse
+                        // transition is in flight. `height` below is a spring
+                        // animating toward `expandedHeight`, so writing to it from
+                        // here re-aims that spring mid-animation: the card would
+                        // visibly resize while it was growing, which reads as a pop.
+                        // The registry estimate is used for the animation and the
+                        // real measurement is applied once the transition settles.
+                        onHeightMeasured = { measured ->
+                            val clamped = measured.coerceIn(
                                 MIN_EXPANDED_HEIGHT_DP.dp,
                                 MAX_EXPANDED_HEIGHT_DP.dp
                             )
+                            if (isTransitionSettled) {
+                                if (expandedHeight != clamped) {
+                                    android.util.Log.d(
+                                        TAG,
+                                        "expanded height ${expandedHeight.value} -> ${clamped.value}"
+                                    )
+                                    expandedHeight = clamped
+                                }
+                            } else {
+                                pendingMeasuredHeight = clamped
+                            }
                         },
                         settings = settings,
                         onReplyStateChanged = onReplyStateChanged
@@ -1351,27 +1381,6 @@ internal fun calculateExpandedTopOffset(
     }
 }
 
-internal fun calculateSecondaryExpandedOffset(
-    secondaryIsPill: Boolean,
-    isCircleLeft: Boolean,
-    isFullWidth: Boolean,
-    expandedCompactX: Float,
-    screenCenter: Float,
-    miniPillWidth: Float,
-    circleSize: Float,
-    compactGap: Float
-): Float {
-    return if (secondaryIsPill) {
-        val secCenter = expandedCompactX + miniPillWidth / 2f
-        if (isFullWidth) secCenter - screenCenter else 0f
-    } else if (isCircleLeft) {
-        val secCenter = expandedCompactX - compactGap - circleSize / 2f
-        if (isFullWidth) secCenter - screenCenter else -(miniPillWidth + compactGap) / 2f
-    } else {
-        val secCenter = expandedCompactX + miniPillWidth + compactGap + circleSize / 2f
-        if (isFullWidth) secCenter - screenCenter else ((miniPillWidth + compactGap) / 2f)
-    }
-}
 
 /**
  * Geometry for the collapsed pill plus its optional companion circle.
@@ -1636,3 +1645,5 @@ internal fun executeSwipeAction(
         }
     }
 }
+
+private const val TAG = "SmartIslandOverlayView"
