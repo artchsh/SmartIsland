@@ -7,7 +7,7 @@
 
 package com.agupta07505.smartisland.service
 
-import android.annotation.SuppressLint
+import androidx.lifecycle.Lifecycle
 import android.app.ActivityOptions
 import android.app.KeyguardManager
 import android.app.Notification
@@ -50,7 +50,7 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -72,7 +72,6 @@ class SmartIslandOverlayService : AccessibilityService() {
     private var screenStateReceiverRegistered = false
     private var torchCallbackRegistered = false
     private var foregroundStarted = false
-    private val isTouchableRegionSupported = MutableStateFlow(false)
     @Volatile private var destroyed = false
     private var isWindowExpanded: Boolean = false
     private var collapseJob: kotlinx.coroutines.Job? = null
@@ -454,7 +453,16 @@ class SmartIslandOverlayService : AccessibilityService() {
                 isFocusableInTouchMode = true
                 setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
                 setContent {
-                    val fullWidth by isTouchableRegionSupported.collectAsState()
+                    // isFullWidth tracks the window geometry directly: the window
+                    // is MATCH_PARENT only while the card is expanded, and pill-sized
+                    // when collapsed. Previously this came from an
+                    // isTouchableRegionSupported StateFlow, which existed only to
+                    // report whether the hidden touchable-region reflection had
+                    // succeeded. With that gone the window is always pill-sized when
+                    // collapsed, so the flag is simply "are we expanded".
+                    val expandedNow by viewModel.expanded.collectAsStateWithLifecycle(
+                        minActiveState = Lifecycle.State.RESUMED
+                    )
                     ThemedOverlayIsland(
                         viewModel = this@SmartIslandOverlayService.viewModel,
                         statusBarHeight = statusBarHeight,
@@ -465,11 +473,9 @@ class SmartIslandOverlayService : AccessibilityService() {
                             performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
                             viewModel.collapse()
                         },
-                        isFullWidth = fullWidth
+                        isFullWidth = expandedNow
                     )
                 }
-
-                setupTouchableRegion(this)
             }
             runCatchingLogged(TAG, "windowManager.addView failed") {
                 windowManager.addView(islandView, collapsedParams(viewModel.settings.value))
@@ -482,139 +488,32 @@ class SmartIslandOverlayService : AccessibilityService() {
         }
     }
 
-    // Use reflection to set up OnComputeInternalInsetsListener since it is a hidden system API.
-    // This allows the overlay window to pass through touches outside the pill boundary.
-    // Keep the suppression local: this best-effort workaround is guarded by
-    // runCatchingLogged so unsupported devices fall back without crashing.
-    @SuppressLint("PrivateApi", "SoonBlockedPrivateApi")
-    private fun setupTouchableRegion(view: ComposeView) {
-        android.util.Log.d(TAG, "setupTouchableRegion: starting registration for view=$view")
-        runCatchingLogged(TAG, "Failed to setup touchable region") {
-            val listenerClass = Class.forName("android.view.ViewTreeObserver\$OnComputeInternalInsetsListener")
-            val insetsClass = Class.forName("android.view.ViewTreeObserver\$InternalInsetsInfo")
-            
-            val setTouchableInsetsMethod = insetsClass.getMethod("setTouchableInsets", Int::class.javaPrimitiveType)
-            val touchableRegionField = insetsClass.getDeclaredField("touchableRegion").apply {
-                isAccessible = true
-            }
-            
-            // InternalInsetsInfo touchable insets options
-            val TOUCHABLE_INSETS_FRAME = 0
-            val TOUCHABLE_INSETS_REGION = 3
-            
-            // Create a dynamic proxy implementation of OnComputeInternalInsetsListener
-            val proxyListener = java.lang.reflect.Proxy.newProxyInstance(
-                classLoader,
-                arrayOf(listenerClass)
-            ) { _, method, args ->
-                if (method.name == "onComputeInternalInsets" && args != null && args.isNotEmpty()) {
-                    val insets = args[0]
-                    val isExpanded = viewModel.expanded.value
-                    val isGone = view.visibility == android.view.View.GONE
-                    val settingsVal = viewModel.settings.value
-                    val notificationsCount = viewModel.notifications.value.size
-                    val isIdleHidden = settingsVal.hideWhenIdle && notificationsCount == 0 && !settingsVal.enableAppShortcuts
-                    android.util.Log.d(TAG, "onComputeInternalInsets callback: isExpanded=$isExpanded isGone=$isGone isIdleHidden=$isIdleHidden")
-                    if (isGone || isIdleHidden) {
-                        setTouchableInsetsMethod.invoke(insets, TOUCHABLE_INSETS_REGION)
-                        val region = touchableRegionField.get(insets) as android.graphics.Region
-                        region.setEmpty()
-                    } else if (isExpanded) {
-                        // When expanded, let the entire frame intercept touches so clicking outside collapses it
-                        setTouchableInsetsMethod.invoke(insets, TOUCHABLE_INSETS_FRAME)
-                    } else {
-                        // PILL-ONLY TOUCHABLE REGION:
-                        // Restrict touch interception to ONLY the pill bounds + padding.
-                        // The region is local to this already-offset window. Touches outside
-                        // the visible collapsed group pass through to the system.
-                        setTouchableInsetsMethod.invoke(insets, TOUCHABLE_INSETS_REGION)
-                        
-                        val density = resources.displayMetrics.density
-                        val screenWidth = resources.displayMetrics.widthPixels
-                        val isSplitMode = notificationsCount >= 2 && !settingsVal.enableNotchMode
-                        val isCircleLeft = settingsVal.circlePosition == SmartIslandSettings.CIRCLE_POSITION_LEFT
-
-                        val mainWidthPx = settingsVal.width * density
-                        val circleSizePx = settingsVal.height * density
-                        val compactGapPx = 8f * density
-                        val edgePaddingPx = 8f * density
-                        val touchPaddingXPx = 16f * density
-                        val pillHeightPx = (settingsVal.height + 16f) * density
-                        val groupWidthPx = mainWidthPx + if (isSplitMode) compactGapPx + circleSizePx else 0f
-
-                        val desiredMainLeftPx = screenWidth / 2f +
-                            settingsVal.xOffset * density - mainWidthPx / 2f
-                        val (minMainLeftPx, maxMainLeftPx) = when {
-                            !isSplitMode -> edgePaddingPx to (screenWidth - edgePaddingPx - mainWidthPx).coerceAtLeast(edgePaddingPx)
-                            isCircleLeft -> (edgePaddingPx + circleSizePx + compactGapPx) to (screenWidth - edgePaddingPx - mainWidthPx).coerceAtLeast(edgePaddingPx + circleSizePx + compactGapPx)
-                            else -> edgePaddingPx to (screenWidth - edgePaddingPx - groupWidthPx).coerceAtLeast(edgePaddingPx)
-                        }
-                        val mainLeftPx = desiredMainLeftPx.coerceIn(minMainLeftPx, maxMainLeftPx)
-                        val groupStartPx = if (isCircleLeft && isSplitMode) mainLeftPx - compactGapPx - circleSizePx else mainLeftPx
-                        val groupEndPx = if (!isCircleLeft && isSplitMode) mainLeftPx + mainWidthPx + compactGapPx + circleSizePx else mainLeftPx + mainWidthPx
-                        val left = (groupStartPx - touchPaddingXPx).toInt().coerceAtLeast(0)
-                        val top = 0
-                        val right = (groupEndPx + touchPaddingXPx).toInt().coerceAtMost(screenWidth)
-                        val bottom = pillHeightPx.toInt()
-                        
-                        android.util.Log.d(TAG, "onComputeInternalInsets: region set to ($left, $top, $right, $bottom), isSplitMode=$isSplitMode")
-                        val region = touchableRegionField.get(insets) as android.graphics.Region
-                        region.set(left, top, right, bottom)
-                    }
-                }
-                null
-            }
-            
-            val registerListener = {
-                val observer = view.viewTreeObserver
-                android.util.Log.d(TAG, "registerListener lambda: viewTreeObserver=$observer, isAlive=${observer.isAlive}")
-                if (observer.isAlive) {
-                    val addListenerMethod = observer.javaClass.getMethod(
-                        "addOnComputeInternalInsetsListener",
-                        listenerClass
-                    )
-                    addListenerMethod.invoke(observer, proxyListener)
-                    isTouchableRegionSupported.value = true
-                    android.util.Log.d(TAG, "OnComputeInternalInsetsListener successfully registered on live ViewTreeObserver")
-                    if (::viewModel.isInitialized && !isWindowExpanded) {
-                        updateWindowLayoutParams(false, viewModel.settings.value)
-                    }
-                }
-            }
-            
-            // ViewTreeObserver changes when the view is attached to a window.
-            // We must register the listener on the live ViewTreeObserver of the attached window.
-            android.util.Log.d(TAG, "setupTouchableRegion: isAttachedToWindow=${view.isAttachedToWindow}")
-            if (view.isAttachedToWindow) {
-                registerListener()
-            } else {
-                view.addOnAttachStateChangeListener(object : android.view.View.OnAttachStateChangeListener {
-                    override fun onViewAttachedToWindow(v: android.view.View) {
-                        android.util.Log.d(TAG, "onViewAttachedToWindow: registering listener now")
-                        registerListener()
-                    }
-                    override fun onViewDetachedFromWindow(v: android.view.View) {
-                        android.util.Log.d(TAG, "onViewDetachedFromWindow called")
-                    }
-                })
-            }
-        } ?: run {
-            isTouchableRegionSupported.value = false
-            android.util.Log.w(TAG, "Touchable region reflection unsupported or blocked, falling back to physical bounds")
-        }
-    }
+    // REMOVED: setupTouchableRegion()
+    //
+    // This built a dynamic java.lang.reflect.Proxy for the hidden
+    // android.view.ViewTreeObserver$OnComputeInternalInsetsListener so the
+    // window could declare a touchable Region equal to the pill while still
+    // being MATCH_PARENT. It required the hidden-API exemption in SmartIslandApp,
+    // which is blocked on Android 14+ (so it had already stopped working on the
+    // fork's target OS) and is a Play policy violation.
+    //
+    // The capability is replaced by FLAG_NOT_TOUCH_MODAL, which this window has
+    // always set: touches landing outside a window's bounds go to the window
+    // behind it. So the collapsed window is now simply sized to the pill plus a
+    // margin, rather than spanning the display and then carving a hole in it.
+    // See AUDIT.md section 4.1.
 
     private fun updateWindowLayoutParams(expanded: Boolean, settings: SmartIslandSettings) {
         if (destroyed || !::windowManager.isInitialized || !::viewModel.isInitialized) return
         val view = islandView ?: return
         val density = resources.displayMetrics.density
         val screenWidthPx = resources.displayMetrics.widthPixels.toFloat()
-        
+
         val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
         val isLocked = keyguardManager?.isKeyguardLocked == true
         isLockScreenActive = isLocked
         viewModel.isLocked.value = isLocked
-        
+
         val isLandscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
         val isIdleHidden = settings.hideWhenIdle && viewModel.notifications.value.isEmpty() && !settings.enableAppShortcuts
         val isHidden = (!settings.showOnLockScreen && isLocked) || (isLandscape && !settings.showInLandscape) || isIdleHidden
@@ -624,36 +523,17 @@ class SmartIslandOverlayService : AccessibilityService() {
             view.visibility = targetVisibility
         }
 
-        val isSplitMode = (viewModel.notifications.value.size >= 2) && !settings.enableNotchMode
-        val isCircleLeft = settings.circlePosition == SmartIslandSettings.CIRCLE_POSITION_LEFT
-        val mainWidthPx = settings.width * density
-        val circleSizePx = settings.height * density
-        val compactGapPx = 8f * density
-        val edgePaddingPx = 8f * density
-        val groupWidthPx = mainWidthPx + if (isSplitMode) compactGapPx + circleSizePx else 0f
-        
-        val desiredMainLeftPx = screenWidthPx / 2f + settings.xOffset * density - mainWidthPx / 2f
-        val (minMainLeftPx, maxMainLeftPx) = when {
-            !isSplitMode -> edgePaddingPx to (screenWidthPx - edgePaddingPx - mainWidthPx).coerceAtLeast(edgePaddingPx)
-            isCircleLeft -> (edgePaddingPx + circleSizePx + compactGapPx) to (screenWidthPx - edgePaddingPx - mainWidthPx).coerceAtLeast(edgePaddingPx + circleSizePx + compactGapPx)
-            else -> edgePaddingPx to (screenWidthPx - edgePaddingPx - groupWidthPx).coerceAtLeast(edgePaddingPx)
-        }
-        val mainLeftPx = desiredMainLeftPx.coerceIn(minMainLeftPx, maxMainLeftPx)
-        val groupStartPx = if (isCircleLeft && isSplitMode) mainLeftPx - compactGapPx - circleSizePx else mainLeftPx
-        val groupEndPx = if (!isCircleLeft && isSplitMode) mainLeftPx + mainWidthPx + compactGapPx + circleSizePx else mainLeftPx + mainWidthPx
-        val groupCenterPx = (groupStartPx + groupEndPx) / 2f
-        val windowXPx = (groupCenterPx - screenWidthPx / 2f).toInt()
+        // Collapsed: size the window to the pill. Expanded: span the display so
+        // the card can be full-bleed and so taps outside collapse it.
+        val geometry = computeCollapsedWindowGeometry(
+            settings = settings,
+            notificationCount = viewModel.notifications.value.size,
+            density = density,
+            screenWidthPx = screenWidthPx
+        )
 
-        val h = if (expanded) {
-            WindowManager.LayoutParams.MATCH_PARENT
-        } else {
-            ((settings.height + 16f) * density).toInt()
-        }
-        val w = if (expanded || isTouchableRegionSupported.value) {
-            WindowManager.LayoutParams.MATCH_PARENT
-        } else {
-            (groupWidthPx + 32f * density).toInt()
-        }
+        val h = if (expanded) WindowManager.LayoutParams.MATCH_PARENT else geometry.heightPx
+        val w = if (expanded) WindowManager.LayoutParams.MATCH_PARENT else geometry.widthPx
         val isInput = viewModel.isInputActive.value && expanded
         val focusFlags = if (isInput) 0 else WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
         val currentFlags = focusFlags or
@@ -662,8 +542,8 @@ class SmartIslandOverlayService : AccessibilityService() {
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
             WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
 
-        val currentX = if (expanded || isTouchableRegionSupported.value) 0 else windowXPx
-        val currentY = if (settings.enableNotchMode) 0 else settings.yOffset.dpToPx()
+        val currentX = if (expanded) 0 else geometry.xPx
+        val currentY = if (expanded || settings.enableNotchMode) 0 else geometry.yPx
         val currentSoftInputMode = if (isInput) {
             WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or
                 WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
@@ -724,31 +604,13 @@ class SmartIslandOverlayService : AccessibilityService() {
     private fun collapsedParams(settings: SmartIslandSettings): WindowManager.LayoutParams {
         val density = resources.displayMetrics.density
         val screenWidthPx = resources.displayMetrics.widthPixels.toFloat()
-        val isSplitMode = if (settings.enableNotchMode) false else (if (::viewModel.isInitialized) viewModel.notifications.value.size >= 2 else false)
-        val isCircleLeft = settings.circlePosition == SmartIslandSettings.CIRCLE_POSITION_LEFT
-        val mainWidthPx = settings.width * density
-        val circleSizePx = settings.height * density
-        val compactGapPx = 8f * density
-        val edgePaddingPx = 8f * density
-        val groupWidthPx = mainWidthPx + if (isSplitMode) compactGapPx + circleSizePx else 0f
-        
-        val desiredMainLeftPx = screenWidthPx / 2f + settings.xOffset * density - mainWidthPx / 2f
-        val (minMainLeftPx, maxMainLeftPx) = when {
-            !isSplitMode -> edgePaddingPx to (screenWidthPx - edgePaddingPx - mainWidthPx).coerceAtLeast(edgePaddingPx)
-            isCircleLeft -> (edgePaddingPx + circleSizePx + compactGapPx) to (screenWidthPx - edgePaddingPx - mainWidthPx).coerceAtLeast(edgePaddingPx + circleSizePx + compactGapPx)
-            else -> edgePaddingPx to (screenWidthPx - edgePaddingPx - groupWidthPx).coerceAtLeast(edgePaddingPx)
-        }
-        val mainLeftPx = desiredMainLeftPx.coerceIn(minMainLeftPx, maxMainLeftPx)
-        val groupStartPx = if (isCircleLeft && isSplitMode) mainLeftPx - compactGapPx - circleSizePx else mainLeftPx
-        val groupEndPx = if (!isCircleLeft && isSplitMode) mainLeftPx + mainWidthPx + compactGapPx + circleSizePx else mainLeftPx + mainWidthPx
-        val groupCenterPx = (groupStartPx + groupEndPx) / 2f
-        val windowXPx = (groupCenterPx - screenWidthPx / 2f).toInt()
-        
-        val w = if (isTouchableRegionSupported.value) {
-            WindowManager.LayoutParams.MATCH_PARENT
-        } else {
-            (groupWidthPx + 32f * density).toInt()
-        }
+        val geometry = computeCollapsedWindowGeometry(
+            settings = settings,
+            notificationCount = if (::viewModel.isInitialized) viewModel.notifications.value.size else 0,
+            density = density,
+            screenWidthPx = screenWidthPx
+        )
+
         val currentFlags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
@@ -756,15 +618,15 @@ class SmartIslandOverlayService : AccessibilityService() {
             WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
 
         return WindowManager.LayoutParams(
-            w,
-            ((settings.height + 16f) * density).toInt(),
+            geometry.widthPx,
+            geometry.heightPx,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             currentFlags,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            x = if (isTouchableRegionSupported.value) 0 else windowXPx
-            y = if (settings.enableNotchMode) 0 else settings.yOffset.dpToPx()
+            x = geometry.xPx
+            y = geometry.yPx
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             }
@@ -963,3 +825,100 @@ class SmartIslandOverlayService : AccessibilityService() {
         private const val AUTO_COLLAPSE_DELAY_MS = 220L
     }
 }
+
+/**
+ * Geometry for the collapsed overlay window.
+ *
+ * The window is deliberately sized to the pill (plus a margin) rather than
+ * spanning the display. Touches outside a window's bounds are delivered to the
+ * window behind it as long as FLAG_NOT_TOUCH_MODAL is set, which this window
+ * always sets. That is how the island lets you tap straight through to the app
+ * underneath it, and it needs no hidden API.
+ *
+ * This replaces an approach where the window was MATCH_PARENT and a hidden
+ * ViewTreeObserver$OnComputeInternalInsetsListener callback carved a touchable
+ * Region down to the pill. See AUDIT.md section 4.1.
+ *
+ * Extracted as a pure function because this arithmetic previously existed in
+ * three places that could drift apart.
+ */
+internal data class CollapsedWindowGeometry(
+    val widthPx: Int,
+    val heightPx: Int,
+    val xPx: Int,
+    val yPx: Int
+)
+
+/**
+ * @param horizontalPaddingDp margin added to each side of the group.
+ *   Must be at least [IslandOverlayView]'s collapsed drag clamp
+ *   (`PILL_DRAG_MAX_OFFSET_DP`, 24dp) or the pill clips against the window edge
+ *   at the extremes of a drag. The collapsed expand/collapse slide
+ *   ([COLLAPSED_TRANSLATION_MAX_DP], 32dp) only runs while the window is
+ *   MATCH_PARENT, so it does not need headroom here.
+ */
+internal fun computeCollapsedWindowGeometry(
+    settings: SmartIslandSettings,
+    notificationCount: Int,
+    density: Float,
+    screenWidthPx: Float,
+    horizontalPaddingDp: Float = COLLAPSED_WINDOW_PADDING_DP
+): CollapsedWindowGeometry {
+    val hasCompanion = if (settings.enableNotchMode) false else notificationCount >= 2
+    val isCircleLeft = settings.circlePosition == SmartIslandSettings.CIRCLE_POSITION_LEFT
+
+    val mainWidthPx = settings.width * density
+    val circleSizePx = settings.height * density
+    val compactGapPx = COMPACT_GAP_DP * density
+    val edgePaddingPx = EDGE_PADDING_DP * density
+    val groupWidthPx = mainWidthPx + if (hasCompanion) compactGapPx + circleSizePx else 0f
+
+    val desiredMainLeftPx = screenWidthPx / 2f + settings.xOffset * density - mainWidthPx / 2f
+    val (minMainLeftPx, maxMainLeftPx) = when {
+        !hasCompanion -> edgePaddingPx to
+            (screenWidthPx - edgePaddingPx - mainWidthPx).coerceAtLeast(edgePaddingPx)
+        isCircleLeft -> (edgePaddingPx + circleSizePx + compactGapPx) to
+            (screenWidthPx - edgePaddingPx - mainWidthPx)
+                .coerceAtLeast(edgePaddingPx + circleSizePx + compactGapPx)
+        else -> edgePaddingPx to
+            (screenWidthPx - edgePaddingPx - groupWidthPx).coerceAtLeast(edgePaddingPx)
+    }
+    val mainLeftPx = desiredMainLeftPx.coerceIn(minMainLeftPx, maxMainLeftPx)
+
+    val groupStartPx = if (isCircleLeft && hasCompanion) mainLeftPx - compactGapPx - circleSizePx else mainLeftPx
+    val groupEndPx = if (!isCircleLeft && hasCompanion) {
+        mainLeftPx + mainWidthPx + compactGapPx + circleSizePx
+    } else {
+        mainLeftPx + mainWidthPx
+    }
+    val groupCenterPx = (groupStartPx + groupEndPx) / 2f
+
+    // The window is gravity TOP | CENTER_HORIZONTAL, so x is an offset from the
+    // screen centre rather than an absolute left edge.
+    val widthPx = (groupWidthPx + 2f * horizontalPaddingDp * density).toInt()
+    val xPx = (groupCenterPx - screenWidthPx / 2f).toInt()
+
+    return CollapsedWindowGeometry(
+        widthPx = widthPx,
+        heightPx = ((settings.height + COLLAPSED_WINDOW_VERTICAL_PADDING_DP) * density).toInt(),
+        xPx = xPx,
+        yPx = if (settings.enableNotchMode) 0 else (settings.yOffset * density).toInt()
+    )
+}
+
+/** Gap between the pill and its companion circle. Mirrors COMPACT_INDICATOR_GAP_DP. */
+private const val COMPACT_GAP_DP = 8f
+
+/** Minimum distance kept between the group and the screen edge. */
+private const val EDGE_PADDING_DP = 8f
+
+/**
+ * Horizontal margin around the group, per side.
+ *
+ * Must exceed the collapsed drag clamp of 24dp so the pill is never clipped by
+ * the window edge mid-drag, plus a little slack.
+ */
+private const val COLLAPSED_WINDOW_PADDING_DP = 28f
+
+/** Vertical margin, so the pill's shadow and elevation are not clipped. */
+private const val COLLAPSED_WINDOW_VERTICAL_PADDING_DP = 16f

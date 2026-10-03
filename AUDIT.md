@@ -653,30 +653,79 @@ The test asserts a state the UI cannot produce.
 
 ## 4. Security and privacy
 
-### 4.1 OPEN — hidden-API exemption for the entire process
+### 4.1 FIXED — hidden-API exemption for the entire process
 
-`SmartIslandApp.bypassHiddenApits()` reflectively invokes
+`SmartIslandApp.bypassHiddenApits()` reflectively invoked
 `dalvik.system.VMRuntime.setHiddenApiExemptions(["L"])`, exempting the **entire**
-hidden-API surface for the process. It is required by `setupTouchableRegion` and
-the Shizuku helper.
+hidden-API surface for the process. It existed for one reason: to let
+`SmartIslandOverlayService.setupTouchableRegion()` reach
+`ViewTreeObserver.OnComputeInternalInsetsListener`, a hidden framework callback
+used to carve the overlay window's touchable area down to the pill while the
+window itself spanned the whole display.
 
-Issues:
+**It was very likely already dead code on the target OS.** The mechanism is:
+`setHiddenApiExemptions(["L"])` is blocked for non-system apps on **Android 14
+and later**. It throws, the `catch` swallows it, and the app logs
+`"Successfully bypassed Hidden API restrictions"` anyway. Without the exemption,
+`Class.forName("android.view.ViewTreeObserver$OnComputeInternalInsetsListener")`
+on a hidden framework class is itself subject to hidden-API enforcement and
+throws, so `isTouchableRegionSupported` was left `false` and the app fell back to
+the small-window path.
 
-- It is **blocked on Android 14+** for non-system apps, and the `catch` swallows
-  the failure, so the app silently loses the capability. It logs
-  `"Successfully bypassed Hidden API restrictions"` without checking anything.
-- It runs triple reflection on the **main thread** in `Application.onCreate` on
-  every cold start, unconditionally.
-- It executes *after* `super.onCreate()`, so classes Hilt already loaded are
-  unaffected, which makes the ordering counterproductive.
-- It is undocumented in every markdown file and in the Copilot instructions,
-  despite being the most platform-sensitive thing in the codebase.
-- `"L"` is a Google Play policy violation and will be flagged by Play Integrity.
+> **Correction on the evidence.** I initially wrote that this was *proven* by
+> observing that `ViewTreeObserver$OnComputeInternalInsetsListener` and
+> `View$InternalInsetsInfo` are absent from `android-36/android.jar`. That check
+> is **invalid**: the SDK's `android.jar` ships only the *public* API surface and
+> strips all hidden classes by design, so they are absent regardless of whether
+> they exist in the framework on a device. The correct evidence is the blocked
+> `setHiddenApiExemptions` call above, not the jar contents.
+>
+> What can be stated with confidence: the exemption is blocked on Android 14+, so
+> on the fork's target (Android 16) the reflection had no exemption to work with.
+> Whether the classes themselves still exist in the Android 16 framework is
+> unverified. The `catch`-and-log-success behaviour means the app could not have
+> reported this either way.
 
-For a fork targeting Android 16, this is the most important thing to resolve.
-The right answer is to stop needing it: the touchable-region trick can be replaced
-by a small always-present `TYPE_ACCESSIBILITY_OVERLAY` window sized to the pill,
-which needs no hidden API at all.
+That made the exemption pure dead weight regardless:
+
+- Blocked on Android 14+, with the failure silently swallowed and mislogged.
+- Three reflective lookups plus a `VMRuntime` invocation on the **main thread** of
+  `Application.onCreate`, on every cold start, unconditionally.
+- Ran *after* `super.onCreate()`, so classes Hilt had already loaded were
+  unaffected.
+- Undocumented in every markdown file despite being the most platform-sensitive
+  thing in the codebase.
+- `"L"` is a Google Play policy violation and is reported by Play Integrity.
+
+**The fix.** Touch pass-through never needed a hidden API. The window has always
+set `FLAG_NOT_TOUCH_MODAL`, which is public API and means touches landing outside
+a window's bounds go to the window behind it. So the collapsed window is now simply
+*sized to the pill plus a margin*, rather than spanning the display and then
+carving a hole in it. Consequences:
+
+- `SmartIslandApp.bypassHiddenApits()` deleted; `onCreate` override gone.
+- `setupTouchableRegion()` deleted, along with `isTouchableRegionSupported` and its
+  `StateFlow`.
+- `isFullWidth` now derives from `expanded`, which is what the flag effectively
+  always was.
+- The three ProGuard keeps for `ViewTreeObserver`/`InternalInsetsInfo` removed.
+- The geometry arithmetic — previously duplicated in **three** places, one of them
+  inside the deleted reflection callback — is now a single pure, unit-tested
+  `computeCollapsedWindowGeometry()`.
+
+**Risk assessment.** Low, because the small-window path is the one that survives
+any hidden-API failure, and that is the path the app falls back to on Android 14+.
+The one behavioural difference on a device where the reflection *did* work is that
+the collapsed window is now pill-sized instead of full-width, which is the
+intended design and covered by 12 new geometry tests. **On-device verification of
+touch pass-through is still outstanding** — see §4.8.
+
+One deliberate sizing decision: the collapsed window's horizontal margin is 28dp
+per side, which must exceed the collapsed drag clamp (`PILL_DRAG_MAX_OFFSET_DP`,
+24dp) or the pill clips against the window edge at the extremes of a drag. The old
+fallback used 16dp and would have clipped. The 32dp collapsed
+expand/collapse slide does *not* need headroom here, because it only runs while
+the window is `MATCH_PARENT`.
 
 ### 4.2 OPEN — Bluetooth battery broadcast is exported and unauthenticated
 
@@ -725,6 +774,34 @@ users cannot upgrade to. Pinning the cert digest in the repo would catch this.
 `android.yml` sets `SIGNING_KEY_PASSWORD=$ANDROID_KEYSTORE_PASSWORD`. One leaked
 secret compromises both. Documented as intentional in `docs/RELEASE_SIGNING.md`,
 but it remains a single point of failure for the entire update chain.
+
+### 4.7 OPEN — on-device verification of the new window model is outstanding
+
+§4.1 replaced the hidden touchable-region reflection with a pill-sized collapsed
+window relying on `FLAG_NOT_TOUCH_MODAL`. Verified so far:
+
+- `compileDebugKotlin`, `lintDebug` and 167 unit tests pass.
+- No `setHiddenApiExemptions`, `VMRuntime`, `OnComputeInternalInsets`,
+  `touchableRegion` or `InternalInsetsInfo` reference remains in any `.kt` or
+  `.pro` file (comment-only mentions aside).
+- 12 new tests cover the geometry, including that the visible group is never
+  clipped and never pushed off-screen for x offsets from -1000dp to +1000dp with
+  the companion circle on either side.
+
+**Not yet verified on hardware.** The USB device disconnected before the debug
+build could be installed, so the following still need checking on the Nothing
+Phone (4a):
+
+1. Tapping the status bar to either side of the pill reaches the app underneath.
+   This is the behaviour `FLAG_NOT_TOUCH_MODAL` is supposed to provide and is the
+   entire point of the change.
+2. The pill does not clip at the extremes of a horizontal drag — this is what the
+   28dp margin was chosen for.
+3. Expand/collapse has no visible pop now that the window resizes between
+   pill-sized and `MATCH_PARENT` on every transition, where previously it stayed
+   `MATCH_PARENT` in both states whenever the reflection had succeeded.
+4. The companion circle and the auto-hide animation still behave at the new
+   window size.
 
 ---
 

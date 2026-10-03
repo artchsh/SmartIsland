@@ -19,19 +19,14 @@
 # from Compose or DataStore, that is a genuine signal to investigate, not
 # something to silence by re-adding a wildcard keep.
 
-# ── Platform reflection targets used in SmartIslandOverlayService ──
-# setupTouchableRegion() builds a dynamic Proxy for the hidden
-# ViewTreeObserver.OnComputeInternalInsetsListener so the overlay window can
-# pass touches through to whatever is underneath the pill.
--keep class android.view.ViewTreeObserver$OnComputeInternalInsetsListener { *; }
--keep class android.view.ViewTreeObserver {
-    public void addOnComputeInternalInsetsListener(android.view.ViewTreeObserver$OnComputeInternalInsetsListener);
-}
--keep class android.view.View$InternalInsetsInfo {
-    public void setTouchableInsets(int);
-    *** mTouchableRegion;
-    *** touchableRegion;
-}
+# ── Platform reflection targets ──
+#
+# NOTE: the keeps for ViewTreeObserver$OnComputeInternalInsetsListener,
+# ViewTreeObserver.addOnComputeInternalInsetsListener and
+# View$InternalInsetsInfo have been REMOVED. They existed only for the
+# touchable-region reflection in SmartIslandOverlayService, which has been
+# deleted. Touch pass-through now uses the public FLAG_NOT_TOUCH_MODAL.
+# See AUDIT.md section 4.1.
 
 # Keep ActivityOptions and setLaunchWindowingMode
 -keep class android.app.ActivityOptions {
