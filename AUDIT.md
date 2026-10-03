@@ -120,6 +120,20 @@ The genuinely reflective members (`OnComputeInternalInsetsListener`,
 `Rating.isHearted`, `MediaMetadata.getRating`, `PlaybackState` custom actions)
 were already narrowly and correctly specified and are unchanged.
 
+**Measured effect.** A/B tested with two release builds from the same tree,
+unsigned so signing is not a variable:
+
+| Build | Release APK |
+| --- | --- |
+| With the two blanket keeps (upstream behaviour) | 8,249,674 bytes |
+| Without them (this fix) | 2,370,948 bytes |
+| **Reduction** | **5,878,726 bytes — 71.3%** |
+
+The with-keeps build also reproduces the published v7.0.0 asset (8,258,734 bytes)
+to within 9 KB, the difference being the signing block, which confirms the
+baseline is sound. This is the single highest-value change in the audit: it cuts
+download size, install time and on-disk footprint by roughly three quarters.
+
 ### 1.7 A test that could not fail
 
 `OemAutostartUtilTest` was:
