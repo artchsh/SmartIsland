@@ -177,33 +177,26 @@ fun IslandOverlayView(
     val compactShapes = compactNotificationShapes(notifications.size, expanded)
     val hasCompanion = if (settings.enableNotchMode) false else notifications.size >= 2
     val isCircleLeft = settings.circlePosition == SmartIslandSettings.CIRCLE_POSITION_LEFT
-    val collapsedGroupWidth = settings.width.dp + if (hasCompanion) compactGap + circleSize else 0.dp
 
-    val desiredMainLeft = screenCenter + settings.xOffset.dp - settings.width.dp / 2f
-    val (minMainLeft, maxMainLeft) = when {
-        !hasCompanion -> compactGap to (screenWidth - compactGap - settings.width.dp).coerceAtLeast(compactGap)
-        isCircleLeft -> (compactGap + circleSize + compactGap) to (screenWidth - compactGap - settings.width.dp).coerceAtLeast(compactGap + circleSize + compactGap)
-        else -> compactGap to (screenWidth - compactGap - collapsedGroupWidth).coerceAtLeast(compactGap)
-    }
-    val collapsedMainLeft = desiredMainLeft.coerceIn(minMainLeft, maxMainLeft)
-    val mainCenter = collapsedMainLeft + settings.width.dp / 2f
-    val circleLeft = if (isCircleLeft) {
-        collapsedMainLeft - compactGap - circleSize
-    } else {
-        collapsedMainLeft + settings.width.dp + compactGap
-    }
+    // Layout math lives in calculateCollapsedLayout() so it can be unit tested.
+    val collapsedGeometry = calculateCollapsedLayout(
+        screenWidthDp = screenWidth.value,
+        screenCenterDp = screenCenter.value,
+        pillWidthDp = settings.width,
+        circleSizeDp = settings.height,
+        xOffsetDp = settings.xOffset,
+        hasCompanion = hasCompanion,
+        isCircleLeft = isCircleLeft,
+        isFullWidth = isFullWidth,
+        enableNotchMode = settings.enableNotchMode
+    )
+    val collapsedMainLeft = collapsedGeometry.mainLeftDp.dp
+    val circleLeft = collapsedGeometry.circleLeftDp.dp
+    val groupCenter = collapsedGeometry.groupCenterDp.dp
+    val collapsedMainOffset = collapsedGeometry.mainOffsetDp.dp
     val circleCenter = circleLeft + circleSize / 2f
-    val groupStart = if (isCircleLeft && hasCompanion) circleLeft else collapsedMainLeft
-    val groupEnd = if (!isCircleLeft && hasCompanion) circleLeft + circleSize else collapsedMainLeft + settings.width.dp
-    val groupCenter = (groupStart + groupEnd) / 2f
+    val mainCenter = collapsedMainLeft + settings.width.dp / 2f
 
-    val collapsedMainOffset = if (settings.enableNotchMode) {
-        settings.xOffset.dp
-    } else if (isFullWidth) {
-        mainCenter - screenCenter
-    } else {
-        mainCenter - groupCenter
-    }
     val expandedTopOffset = calculateExpandedTopOffset(
         enableNotchMode = settings.enableNotchMode,
         hasCompanion = hasCompanion,
@@ -1126,6 +1119,76 @@ internal fun calculateSecondaryExpandedOffset(
         if (isFullWidth) secCenter - screenCenter else ((miniPillWidth + compactGap) / 2f)
     }
 }
+
+/**
+ * Geometry for the collapsed pill plus its optional companion circle.
+ *
+ * All values are plain density-independent pixels so this is callable from a
+ * JVM unit test. It was extracted from the body of IslandOverlayView for
+ * exactly that reason: the layout math used to live inline inside the
+ * @Composable, which made it unreachable from tests. IslandOverlayLayoutTest
+ * previously worked around that by re-implementing the same arithmetic inside
+ * the test file, which asserted that the copy agreed with itself and passed
+ * green even when the real composable was wrong.
+ *
+ * The `!hasCompanion` branch is included deliberately. The old inline test
+ * copy omitted it entirely, so the no-companion case was never exercised.
+ */
+internal data class CollapsedLayoutGeometry(
+    val mainLeftDp: Float,
+    val circleLeftDp: Float,
+    val groupCenterDp: Float,
+    val mainOffsetDp: Float
+)
+
+internal fun calculateCollapsedLayout(
+    screenWidthDp: Float,
+    screenCenterDp: Float,
+    pillWidthDp: Float,
+    circleSizeDp: Float,
+    xOffsetDp: Float,
+    hasCompanion: Boolean,
+    isCircleLeft: Boolean,
+    isFullWidth: Boolean,
+    enableNotchMode: Boolean,
+    compactGapDp: Float = COMPACT_INDICATOR_GAP_DP
+): CollapsedLayoutGeometry {
+    val collapsedGroupWidth = pillWidthDp + if (hasCompanion) compactGapDp + circleSizeDp else 0f
+
+    val desiredMainLeft = screenCenterDp + xOffsetDp - pillWidthDp / 2f
+    val (minMainLeft, maxMainLeft) = when {
+        !hasCompanion -> compactGapDp to
+            (screenWidthDp - compactGapDp - pillWidthDp).coerceAtLeast(compactGapDp)
+        isCircleLeft -> (compactGapDp + circleSizeDp + compactGapDp) to
+            (screenWidthDp - compactGapDp - pillWidthDp).coerceAtLeast(compactGapDp + circleSizeDp + compactGapDp)
+        else -> compactGapDp to
+            (screenWidthDp - compactGapDp - collapsedGroupWidth).coerceAtLeast(compactGapDp)
+    }
+    val collapsedMainLeft = desiredMainLeft.coerceIn(minMainLeft, maxMainLeft)
+    val mainCenter = collapsedMainLeft + pillWidthDp / 2f
+    val circleLeft = if (isCircleLeft) {
+        collapsedMainLeft - compactGapDp - circleSizeDp
+    } else {
+        collapsedMainLeft + pillWidthDp + compactGapDp
+    }
+    val groupStart = if (isCircleLeft && hasCompanion) circleLeft else collapsedMainLeft
+    val groupEnd = if (!isCircleLeft && hasCompanion) circleLeft + circleSizeDp else collapsedMainLeft + pillWidthDp
+    val groupCenter = (groupStart + groupEnd) / 2f
+
+    val mainOffset = when {
+        enableNotchMode -> xOffsetDp
+        isFullWidth -> mainCenter - screenCenterDp
+        else -> mainCenter - groupCenter
+    }
+
+    return CollapsedLayoutGeometry(
+        mainLeftDp = collapsedMainLeft,
+        circleLeftDp = circleLeft,
+        groupCenterDp = groupCenter,
+        mainOffsetDp = mainOffset
+    )
+}
+
 private const val SWIPE_THRESHOLD_DP = 35f
 private const val PILL_SWIPE_THRESHOLD_DP = 16f
 private const val DRAG_MAX_OFFSET_DP = 100f

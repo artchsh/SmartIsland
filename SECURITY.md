@@ -2,13 +2,15 @@
 
 ## Supported Versions
 
-Security fixes are handled for the current v3 release and the `main` branch unless a separate maintained release branch is announced.
+Security fixes are handled for the current major release line and the `main` branch unless a separate maintained release branch is announced.
 
 | Version | Supported |
 | --- | --- |
-| `3.x` | Yes |
+| `7.x` | Yes |
 | `main` | Yes |
-| `< 3.0` | No |
+| `< 7.0` | No |
+
+Older releases were published under an earlier numbering scheme (`v1.0`, `v2.0`, `v3.0`, then `v4.0.0` onward). None of those lines receive security fixes.
 
 ## Reporting A Vulnerability
 

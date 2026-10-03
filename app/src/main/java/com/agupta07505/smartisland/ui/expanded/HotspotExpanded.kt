@@ -71,8 +71,8 @@ fun HotspotExpanded(
     // Strip "Active . 2 device" string from subtitle so it displays clean description
     val cleanSubtitle = remember(notification.text) {
         notification.text
-            .replace(Regex("""(?i)active\s*[•·.-]?\s*\d+\s*device.*"""), "")
-            .replace(Regex("""(?i)\d+\s*device\s*connected"""), "")
+            .replace(HOTSPOT_ACTIVE_DEVICES, "")
+            .replace(HOTSPOT_DEVICES_CONNECTED, "")
             .trim()
             .ifBlank { "Sharing mobile data" }
     }
@@ -273,3 +273,7 @@ fun HotspotExpanded(
         }
     }
 }
+
+/** Hoisted: these were compiled inside the composable body on every recomposition. */
+private val HOTSPOT_ACTIVE_DEVICES = Regex("""(?i)active\s*[•·.-]?\s*\d+\s*device.*""")
+private val HOTSPOT_DEVICES_CONNECTED = Regex("""(?i)\d+\s*device\s*connected""")

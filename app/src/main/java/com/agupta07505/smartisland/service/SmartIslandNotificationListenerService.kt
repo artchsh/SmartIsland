@@ -360,6 +360,36 @@ class SmartIslandNotificationListenerService : NotificationListenerService() {
         }
     }
 
+    /**
+     * Release cached bitmaps under memory pressure.
+     *
+     * There was no onTrimMemory anywhere in the project. That matters because
+     * this service caches launcher icons (iconCache, up to 50 bitmaps) and the
+     * in-memory notification repository retains up to 50 IslandNotifications,
+     * each of which may hold a full-resolution album-art Bitmap. Media session
+     * artwork is routinely 1000x1000 or larger, so a handful of those is
+     * several megabytes. Nothing was ever dropped in response to the system
+     * asking for memory back, which made this the most likely OOM path.
+     *
+     * The icon cache is rebuilt lazily on the next notification, so evicting it
+     * is cheap and safe.
+     */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        when {
+            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE -> {
+                iconCache.evictAll()
+                notificationRepository.removeAllNotifications()
+            }
+            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> {
+                iconCache.evictAll()
+            }
+            // Below RUNNING_LOW the process is a candidate for death; the caches
+            // are already gone by this point so there is nothing left to trim.
+            else -> Unit
+        }
+    }
+
     override fun onListenerDisconnected() {
         isSystemConnected = false
         super.onListenerDisconnected()

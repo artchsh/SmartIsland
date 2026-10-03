@@ -287,3 +287,24 @@ Contributions are warmly welcomed! Please read [CONTRIBUTING.md](CONTRIBUTING.md
 Smart Island is licensed under the [GNU General Public License v3.0](LICENSE).  
 Copyright (C) 2026 **Animesh Gupta**.
 
+### About this fork
+
+This repository is a fork of
+[`agupta07505/SmartIsland`](https://github.com/agupta07505/SmartIsland), maintained
+here for substantial UI, UX, performance and battery work.
+
+Because the project is GPLv3, this fork remains GPLv3 and the original copyright
+and license notices are preserved in every source file. Per GPL-3.0 Sections 4
+and 5:
+
+- All original authorship credit to **Animesh Gupta** is retained and must not be
+  removed.
+- This fork's modifications are likewise distributed under GPLv3.
+- If you redistribute this fork, you must also offer the corresponding source.
+
+Reminders to report bugs or request features here are directed at this fork.
+Issues with the original design intent belong upstream.
+
+See [AUDIT.md](AUDIT.md) for the engineering review that motivated this fork and
+for the full list of outstanding issues.
+

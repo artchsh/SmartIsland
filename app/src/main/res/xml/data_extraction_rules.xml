@@ -5,10 +5,38 @@
   Licensed under the GNU GPL v3 License
   Do not remove or alter this notice. - Per GPL-3.0 Section 4 & Section 5
 -->
+<!--
+  Backup / transfer rules for Android 12+ (API 31+).
+
+  Both <cloud-backup> and <device-transfer> are mandatory: a
+  <data-extraction-rules> document missing either child is rejected by the
+  platform and silently ignored, which is the state this file was previously in.
+
+  All domains are excluded from both paths so that notification history
+  (titles, message bodies, app names) and island settings never leave the
+  device. See PRIVACY.md -> "Data Retention and Backup".
+-->
 <data-extraction-rules>
     <cloud-backup>
-        <include
-            domain="sharedpref"
-            path="." />
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+        <exclude domain="device_root" path="." />
+        <exclude domain="device_file" path="." />
+        <exclude domain="device_database" path="." />
+        <exclude domain="device_sharedpref" path="." />
     </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+        <exclude domain="device_root" path="." />
+        <exclude domain="device_file" path="." />
+        <exclude domain="device_database" path="." />
+        <exclude domain="device_sharedpref" path="." />
+    </device-transfer>
 </data-extraction-rules>

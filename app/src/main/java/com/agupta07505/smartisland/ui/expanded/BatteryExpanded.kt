@@ -160,7 +160,7 @@ fun BatteryExpanded(
             ) {
                 DottedRing(
                     progress = progress,
-                    rotationAngle = rotationAngle,
+                    rotationAngle = { rotationAngle },
                     modifier = Modifier.size(44.dp),
                     color = batteryColor
                 )

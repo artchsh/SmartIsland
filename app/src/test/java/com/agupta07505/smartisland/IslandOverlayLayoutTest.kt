@@ -8,6 +8,7 @@
 package com.agupta07505.smartisland
 
 import com.agupta07505.smartisland.ui.CompactNotificationShape
+import com.agupta07505.smartisland.ui.calculateCollapsedLayout
 import com.agupta07505.smartisland.ui.compactNotificationShapes
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -34,73 +35,172 @@ class IslandOverlayLayoutTest {
         )
     }
 
+    /**
+     * Exercises the REAL collapsed-layout function.
+     *
+     * The previous version of this test re-implemented the clamping arithmetic
+     * inline (lines 48-70 of the old file), duplicating IslandOverlayView's
+     * composable body because the math was unreachable from a unit test. The
+     * test therefore asserted that its own copy agreed with itself and stayed
+     * green no matter what the composable did. The copy had already drifted:
+     * the production `when` has a `!hasCompanion` branch that the copy omitted
+     * entirely, so the single-notification case was never tested.
+     *
+     * The math now lives in `calculateCollapsedLayout` and is called directly.
+     */
     @Test
-    fun splitModeCircleFitsWithinWindowBounds() {
-        val density = 2.75f
-        val screenWidthPx = 1080f
-        val widthDp = 112f
-        val heightDp = 34f
+    fun splitModeGeometryKeepsPillAndCircleOnScreenWithoutOverlap() {
+        val screenWidthDp = 1080f / 2.75f // matches the old px-based fixtures
+        val screenCenterDp = screenWidthDp / 2f
+        val pillWidthDp = 112f
+        val circleSizeDp = 34f
         val compactGapDp = 8f
         val edgePaddingDp = 8f
 
-        listOf(true, false).forEach { isCircleLeft ->
-            listOf(-130f, 0f, 130f).forEach { xOffsetDp ->
-                val mainWidthPx = widthDp * density
-                val circleSizePx = heightDp * density
-                val compactGapPx = compactGapDp * density
-                val edgePaddingPx = edgePaddingDp * density
-                val groupWidthPx = mainWidthPx + compactGapPx + circleSizePx
-
-                val desiredMainLeftPx = screenWidthPx / 2f + xOffsetDp * density - mainWidthPx / 2f
-                val (minMainLeftPx, maxMainLeftPx) = when {
-                    isCircleLeft -> (edgePaddingPx + circleSizePx + compactGapPx) to (screenWidthPx - edgePaddingPx - mainWidthPx).coerceAtLeast(edgePaddingPx + circleSizePx + compactGapPx)
-                    else -> edgePaddingPx to (screenWidthPx - edgePaddingPx - groupWidthPx).coerceAtLeast(edgePaddingPx)
-                }
-                val mainLeftPx = desiredMainLeftPx.coerceIn(minMainLeftPx, maxMainLeftPx)
-                val groupStartPx = if (isCircleLeft) mainLeftPx - compactGapPx - circleSizePx else mainLeftPx
-                val groupEndPx = if (!isCircleLeft) mainLeftPx + mainWidthPx + compactGapPx + circleSizePx else mainLeftPx + mainWidthPx
-                val groupCenterPx = (groupStartPx + groupEndPx) / 2f
-                val windowXPx = (groupCenterPx - screenWidthPx / 2f).toInt()
-                val windowWidthPx = (groupWidthPx + 32f * density).toInt()
-
-                val windowLeftPx = screenWidthPx / 2f + windowXPx - windowWidthPx / 2f
-                val windowRightPx = screenWidthPx / 2f + windowXPx + windowWidthPx / 2f
-
-                val circleLeftPx = if (isCircleLeft) mainLeftPx - compactGapPx - circleSizePx else mainLeftPx + mainWidthPx + compactGapPx
-                val circleRightPx = circleLeftPx + circleSizePx
-
-                // 1. Assert no overlap between main pill and circle (separation >= compactGapPx)
-                if (isCircleLeft) {
-                    val gap = mainLeftPx - circleRightPx
-                    org.junit.Assert.assertTrue(
-                        "Left circle must not collapse into pill, gap ($gap) >= compactGap ($compactGapPx)",
-                        gap >= compactGapPx - 0.01f
+        for (hasCompanion in listOf(true, false)) {
+            for (isCircleLeft in listOf(true, false)) {
+                for (xOffsetDp in listOf(-130f, 0f, 130f, 400f, -400f)) {
+                    val g = calculateCollapsedLayout(
+                        screenWidthDp = screenWidthDp,
+                        screenCenterDp = screenCenterDp,
+                        pillWidthDp = pillWidthDp,
+                        circleSizeDp = circleSizeDp,
+                        xOffsetDp = xOffsetDp,
+                        hasCompanion = hasCompanion,
+                        isCircleLeft = isCircleLeft,
+                        isFullWidth = false,
+                        enableNotchMode = false,
+                        compactGapDp = compactGapDp
                     )
-                } else {
-                    val gap = circleLeftPx - (mainLeftPx + mainWidthPx)
+                    val where = "companion=$hasCompanion circleLeft=$isCircleLeft x=$xOffsetDp"
+
+                    val mainRight = g.mainLeftDp + pillWidthDp
+                    val circleRight = g.circleLeftDp + circleSizeDp
+
+                    // 1. Pill stays within the screen with a sane edge margin,
+                    //    even for extreme x offsets that would push it off-screen.
                     org.junit.Assert.assertTrue(
-                        "Right circle must not collapse into pill, gap ($gap) >= compactGap ($compactGapPx)",
-                        gap >= compactGapPx - 0.01f
+                        "Pill left (${g.mainLeftDp}) off-screen ($where)",
+                        g.mainLeftDp >= edgePaddingDp - 0.01f
                     )
+                    org.junit.Assert.assertTrue(
+                        "Pill right ($mainRight) off-screen ($where)",
+                        mainRight <= screenWidthDp - edgePaddingDp + 0.01f
+                    )
+
+                    if (hasCompanion) {
+                        // 2. Circle stays within the screen.
+                        org.junit.Assert.assertTrue(
+                            "Circle left (${g.circleLeftDp}) off-screen ($where)",
+                            g.circleLeftDp >= edgePaddingDp - 0.01f
+                        )
+                        org.junit.Assert.assertTrue(
+                            "Circle right ($circleRight) off-screen ($where)",
+                            circleRight <= screenWidthDp - edgePaddingDp + 0.01f
+                        )
+
+                        // 3. Circle never collapses into the pill.
+                        val gap = if (isCircleLeft) {
+                            g.mainLeftDp - circleRight
+                        } else {
+                            g.circleLeftDp - mainRight
+                        }
+                        org.junit.Assert.assertTrue(
+                            "Circle overlaps pill, gap ($gap) < compactGap ($compactGapDp) ($where)",
+                            gap >= compactGapDp - 0.01f
+                        )
+
+                        // 4. Circle is on the requested side.
+                        if (isCircleLeft) {
+                            org.junit.Assert.assertTrue(
+                                "Circle should precede the pill ($where)",
+                                g.circleLeftDp < g.mainLeftDp
+                            )
+                        } else {
+                            org.junit.Assert.assertTrue(
+                                "Circle should follow the pill ($where)",
+                                g.circleLeftDp > mainRight
+                            )
+                        }
+                    } else {
+                        // 5. With no companion the circle offset is meaningless but
+                        //    must not drag the pill out of bounds.
+                        org.junit.Assert.assertTrue(
+                            "No-companion pill left (${g.mainLeftDp}) off-screen ($where)",
+                            g.mainLeftDp >= edgePaddingDp - 0.01f
+                        )
+                    }
                 }
-
-                // 2. Assert that the secondary circle is completely inside the window
-                org.junit.Assert.assertTrue(
-                    "Circle left ($circleLeftPx) must be >= window left ($windowLeftPx)",
-                    circleLeftPx >= windowLeftPx - 0.01f
-                )
-                org.junit.Assert.assertTrue(
-                    "Circle right ($circleRightPx) must be <= window right ($windowRightPx)",
-                    circleRightPx <= windowRightPx + 0.01f
-                )
-
-                // 3. Assert circle and pill are within screen bounds
-                org.junit.Assert.assertTrue(circleLeftPx >= edgePaddingPx - 0.01f)
-                org.junit.Assert.assertTrue(circleRightPx <= screenWidthPx - edgePaddingPx + 0.01f)
-                org.junit.Assert.assertTrue(mainLeftPx >= edgePaddingPx - 0.01f)
-                org.junit.Assert.assertTrue(mainLeftPx + mainWidthPx <= screenWidthPx - edgePaddingPx + 0.01f)
             }
         }
+    }
+
+    /**
+     * Notch mode ignores the companion circle and uses the raw x offset, which
+     * is the branch most likely to regress silently because it is visually
+     * indistinguishable from the normal case when no companion is present.
+     */
+    @Test
+    fun notchModeUsesRawXOffsetRegardlessOfCompanion() {
+        val screenWidthDp = 400f
+        for (hasCompanion in listOf(true, false)) {
+            val g = calculateCollapsedLayout(
+                screenWidthDp = screenWidthDp,
+                screenCenterDp = screenWidthDp / 2f,
+                pillWidthDp = 112f,
+                circleSizeDp = 34f,
+                xOffsetDp = 12f,
+                hasCompanion = hasCompanion,
+                isCircleLeft = false,
+                isFullWidth = false,
+                enableNotchMode = true
+            )
+            assertEquals("Notch mode must use the raw x offset", 12f, g.mainOffsetDp, 0.001f)
+        }
+    }
+
+    /**
+     * isFullWidth centres the pill on the screen rather than on the
+     * pill+circle group, which is what the expanded full-bleed window needs.
+     */
+    @Test
+    fun fullWidthModeCentresPillOnScreenNotOnGroup() {
+        val screenWidthDp = 400f
+        val screenCenterDp = screenWidthDp / 2f
+        val pillWidthDp = 112f
+
+        val grouped = calculateCollapsedLayout(
+            screenWidthDp = screenWidthDp,
+            screenCenterDp = screenCenterDp,
+            pillWidthDp = pillWidthDp,
+            circleSizeDp = 34f,
+            xOffsetDp = 0f,
+            hasCompanion = true,
+            isCircleLeft = false,
+            isFullWidth = false,
+            enableNotchMode = false
+        )
+        val fullWidth = calculateCollapsedLayout(
+            screenWidthDp = screenWidthDp,
+            screenCenterDp = screenCenterDp,
+            pillWidthDp = pillWidthDp,
+            circleSizeDp = 34f,
+            xOffsetDp = 0f,
+            hasCompanion = true,
+            isCircleLeft = false,
+            isFullWidth = true,
+            enableNotchMode = false
+        )
+
+        // With a companion on the right, the group centre sits left of the pill
+        // centre, so the two offsets must differ.
+        org.junit.Assert.assertTrue(
+            "Grouped and full-width offsets should differ when a companion is present",
+            kotlin.math.abs(grouped.mainOffsetDp - fullWidth.mainOffsetDp) > 0.01f
+        )
+        // fullWidth pins the pill centre to the screen centre exactly.
+        val pillCenter = fullWidth.mainLeftDp + pillWidthDp / 2f
+        assertEquals(screenCenterDp, pillCenter, 0.01f)
     }
 
     @Test

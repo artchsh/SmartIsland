@@ -8,16 +8,25 @@ on:
   push:
     branches: [main, dev]
     tags: ["v*"]
-    paths-ignore: &non_code_paths
+    # NOTE: no paths-ignore here on purpose.
+    #
+    # GitHub applies path filters to tag pushes as well as branch pushes, so a
+    # paths-ignore on the push event meant a release commit touching only
+    # markdown (a version bump plus a changelog entry, no code change) caused
+    # the v* tag push to be filtered out. The result was no release, no failing
+    # job, and no log line explaining the absence.
+    #
+    # Path filtering is only worth its CI cost on pull requests, where it is
+    # applied below. Every push is verified.
+  pull_request:
+    branches: [main, dev]
+    paths-ignore:
       - "**/*.md"
       - "assets/**"
       - "screenshots/**"
       - "LICENSE"
       - ".github/ISSUE_TEMPLATE/**"
       - ".github/PULL_REQUEST_TEMPLATE.md"
-  pull_request:
-    branches: [main, dev]
-    paths-ignore: *non_code_paths
   workflow_dispatch:
 
 concurrency:
@@ -163,7 +172,18 @@ jobs:
 
   publish:
     name: Publish GitHub release
-    if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
+    # Tag-only, on purpose.
+    #
+    # This job previously also ran on every push to `main`, where TAG was
+    # reconstructed as "v$versionName" from build.gradle.kts. Because the
+    # upload used `--clobber`, any commit landing on main without a versionCode
+    # bump silently overwrote the already-published release asset. Users were
+    # told v7.0.0 was current, so nobody re-downloaded, and anyone who had
+    # downloaded early ended up with a different binary than the tag implied.
+    #
+    # Publishing only from an immutable tag makes a published release
+    # reproducible from source and impossible to mutate after the fact.
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     needs: release
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -176,15 +196,21 @@ jobs:
         with:
           name: SmartIsland-release-${{ github.run_attempt }}
 
+      - name: Generate SHA-256 checksum
+        env:
+          APK_NAME: ${{ needs.release.outputs.apk_name }}
+        run: |
+          cd "$RUNNER_TEMP"
+          sha256sum "$APK_NAME" > "$APK_NAME.sha256"
+          cat "$APK_NAME.sha256"
+
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           APK_NAME: ${{ needs.release.outputs.apk_name }}
-          VERSION_TAG: ${{ needs.release.outputs.version_tag }}
         run: |
-          TAG="$VERSION_TAG"
-          [[ "$GITHUB_REF" == refs/tags/* ]] && TAG="$GITHUB_REF_NAME"
+          TAG="$GITHUB_REF_NAME"
           ASSET="$APK_NAME"
 
           RELEASE_INTRO=$(cat <<EOF
@@ -203,8 +229,16 @@ jobs:
           - Animated floating island for notifications, calls, music, and charging
           - Quick access to selected and recently used apps
           - Customizable size, position, colors, and corner radius
-          - Local, on-device processing with no analytics or Internet permission
+          - Local, on-device processing; the only network request is an opt-in check for new releases
           - Free and open-source Android app built with Kotlin and Jetpack Compose
+
+          ## Verify your download
+
+          A `.sha256` checksum file accompanies every release:
+
+          ```
+          sha256sum -c $APK_NAME.sha256
+          ```
 
           ## Project links
 
@@ -215,9 +249,15 @@ jobs:
           )
 
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$ASSET" --clobber
+            # No --clobber. A tag is immutable, so re-running a release for an
+            # existing tag must fail loudly rather than replace a published
+            # binary that users may already have downloaded.
+            echo "Release $TAG already exists. Refusing to overwrite its assets." >&2
+            echo "If this is intentional, delete the release first or bump the version." >&2
+            gh release upload "$TAG" "$ASSET" "$ASSET.sha256" --clobber=false && \
+              echo "Uploaded missing assets to existing release $TAG."
           else
-            gh release create "$TAG" "$ASSET" \
+            gh release create "$TAG" "$ASSET" "$ASSET.sha256" \
               --title "Smart Island $TAG - Android Dynamic Island" \
               --notes "$RELEASE_INTRO" \
               --generate-notes

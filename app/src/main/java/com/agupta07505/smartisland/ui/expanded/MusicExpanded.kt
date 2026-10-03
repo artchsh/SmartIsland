@@ -81,6 +81,13 @@ fun MusicExpanded(
         }
     }
 
+    // NOTE: MediaController exposes no public release()/close() (verified
+    // against android-36). It is a client-side proxy for the session and there
+    // is no supported way to dispose of one created from a token, so the
+    // only cleanup available is unregisterCallback below. Instances are keyed
+    // by mediaToken, so the number created is bounded by the number of
+    // distinct media sessions the user encounters, not by play count.
+
     val getEstimatedPosition = remember {
         { ctrl: android.media.session.MediaController?, fallbackPos: Long? ->
             val state = ctrl?.playbackState
@@ -105,11 +112,26 @@ fun MusicExpanded(
 
     if (localIsPlaying) {
         LaunchedEffect(controller, positionMs) {
+            var previous = livePositionMs
             while (true) {
-                if (System.currentTimeMillis() - lastSeekTimeMs > 1500L) {
-                    livePositionMs = getEstimatedPosition(controller, positionMs)
+                // Suppress updates for 1.5s after a seek so the bar does not
+                // fight the user's finger.
+                if (System.currentTimeMillis() - lastSeekTimeMs > SEEK_SETTLE_MS) {
+                    val next = getEstimatedPosition(controller, positionMs)
+                    // Only write when it actually moved. The previous version
+                    // assigned unconditionally 33 times a second, which
+                    // recomposed the entire music card on every tick even while
+                    // paused-at-the-same-position or during a buffering stall.
+                    if (next != previous) {
+                        previous = next
+                        livePositionMs = next
+                    }
                 }
-                kotlinx.coroutines.delay(30) // 30ms for 33fps smooth progress sliding
+                // 100ms (10fps) rather than 30ms (33fps). A seek bar does not
+                // need 33 updates a second, and the difference is ~70% less
+                // coroutine wakeups plus 70% fewer recompositions of this
+                // composable for no visible gain.
+                kotlinx.coroutines.delay(POSITION_POLL_INTERVAL_MS)
             }
         }
     }
@@ -211,6 +233,18 @@ fun MusicExpanded(
     }
     var repeatMode by remember(notification?.key) { mutableStateOf(0) }
 
+    // Album art is held in snapshot state and updated from the controller
+    // callback rather than read during composition.
+    //
+    // The previous code used `remember(controller, controller?.metadata)`.
+    // The second key is a binder IPC call into the media session, evaluated on
+    // EVERY composition. Combined with the 33fps position poll above, that was
+    // a cross-process call roughly 33 times a second for the entire time music
+    // was playing.
+    var mediaMetadata by remember(notification?.key) {
+        mutableStateOf(controller?.metadata)
+    }
+
     DisposableEffect(controller) {
         if (controller == null) return@DisposableEffect onDispose {}
         val callback = object : android.media.session.MediaController.Callback() {
@@ -220,6 +254,7 @@ fun MusicExpanded(
             }
             override fun onMetadataChanged(metadata: android.media.MediaMetadata?) {
                 isLiked = resolveLikeState(controller)
+                mediaMetadata = metadata
             }
             override fun onExtrasChanged(extras: android.os.Bundle?) {
                 repeatMode = getRepeatModeReflect(controller)
@@ -235,6 +270,7 @@ fun MusicExpanded(
         }
         repeatMode = getRepeatModeReflect(controller)
         isLiked = resolveLikeState(controller)
+        mediaMetadata = controller.metadata
         controller.registerCallback(callback)
         onDispose {
             controller.unregisterCallback(callback)
@@ -299,8 +335,10 @@ fun MusicExpanded(
         }
     }
 
-    val metadataArtwork = remember(controller, controller?.metadata) {
-        val meta = controller?.metadata
+    // Keyed on the snapshot state, not on controller?.metadata. Reading the
+    // controller here would reintroduce a binder IPC call per composition.
+    val metadataArtwork = remember(mediaMetadata) {
+        val meta = mediaMetadata
         if (meta != null) {
             runCatchingLogged("MusicExpanded", "Failed to extract metadata artwork") {
                 meta.getBitmap(android.media.MediaMetadata.METADATA_KEY_ART)
@@ -535,3 +573,14 @@ fun MusicExpanded(
     }
 }
 }
+
+/**
+ * How often the estimated playback position is re-sampled while playing.
+ *
+ * 100ms (10fps) is visually indistinguishable from 30ms for a seek bar and
+ * cuts coroutine wakeups and recompositions of this composable by ~70%.
+ */
+private const val POSITION_POLL_INTERVAL_MS = 100L
+
+/** Ignore position polling for this long after the user scrubs the seek bar. */
+private const val SEEK_SETTLE_MS = 1500L

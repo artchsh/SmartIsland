@@ -374,7 +374,10 @@ internal fun BatteryCollapsedGlyph(notification: IslandNotification?, settings: 
         label = "batteryScale"
     )
 
-    val rotationAngle by infiniteTransition.animateFloat(
+    // Kept as a State, not a by-delegate Float. Passing the delegate value on
+    // forced a recomposition of this whole glyph 60x/second; passing the State
+    // lets DottedRing read it in the draw phase instead.
+    val rotationAngle = infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
@@ -390,7 +393,7 @@ internal fun BatteryCollapsedGlyph(notification: IslandNotification?, settings: 
     ) {
         DottedRing(
             progress = progress,
-            rotationAngle = rotationAngle,
+            rotationAngle = { rotationAngle.value },
             modifier = Modifier.size(22.dp),
             color = batteryColor
         )
@@ -494,11 +497,19 @@ private fun AudioVisualizer(
         horizontalArrangement = Arrangement.spacedBy(2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        val infiniteTransition = rememberInfiniteTransition(label = "audio_visualizer")
-        val heights = listOf(0.3f to 0.9f, 0.5f to 1.0f, 0.2f to 0.7f)
+        // Hoisted: this list was previously rebuilt on every recomposition of
+        // AudioVisualizer, and because the animated value below was read in
+        // composition, AudioVisualizer recomposed on every animation frame.
+        val heights = remember { listOf(0.3f to 0.9f, 0.5f to 1.0f, 0.2f to 0.7f) }
 
         heights.forEachIndexed { index, (min, max) ->
-            val heightFraction by infiniteTransition.animateFloat(
+            // Read the animated value INSIDE graphicsLayer. Reading it during
+            // composition invalidates this composable on every frame (60/s),
+            // which re-runs the whole Row and re-measures the bar. Reading it in
+            // the graphicsLayer block defers the work to the draw phase and
+            // skips recomposition entirely.
+            val transition = rememberInfiniteTransition(label = "audio_visualizer")
+            val heightFraction = transition.animateFloat(
                 initialValue = min,
                 targetValue = if (isPlaying) max else min,
                 animationSpec = infiniteRepeatable(
@@ -512,7 +523,8 @@ private fun AudioVisualizer(
                 modifier = Modifier
                     .size(width = 3.dp, height = 14.dp)
                     .graphicsLayer {
-                        scaleY = if (isPlaying) heightFraction else min
+                        // .value read here: draw-phase only, no recomposition.
+                        scaleY = if (isPlaying) heightFraction.value else min
                         transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0.5f)
                     }
                     .clip(RoundedCornerShape(1.dp))
@@ -638,7 +650,7 @@ private fun LiveActivityCollapsedRight(notification: IslandNotification?, settin
     val etaText = remember(notification) {
         if (notification == null) return@remember "Active"
         val text = "${notification.title} ${notification.text}"
-        val matcher = java.util.regex.Pattern.compile("(\\d+)\\s*(?:mins?|minutes?|min|m)\\b", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(text)
+        val matcher = COLLAPSED_LIVE_ACTIVITY_MINS.matcher(text)
         if (matcher.find()) {
             "${matcher.group(1)} min"
         } else if (text.lowercase().contains("arrived")) {
@@ -699,7 +711,7 @@ private fun NavigationCollapsedRight(notification: IslandNotification?, settings
         if (notification == null) return@remember "200 m"
         val title = notification.title
         val text = notification.text
-        val pattern = java.util.regex.Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*(?:m|km|ft|mi|miles?|meters?)\\b", java.util.regex.Pattern.CASE_INSENSITIVE)
+        val pattern = COLLAPSED_NAV_DISTANCE
         val matcher = pattern.matcher("$title $text")
         if (matcher.find()) matcher.group(0) else "In 200 m"
     }
@@ -717,13 +729,19 @@ private fun CustomPremiumTransferIcon(
     isUpload: Boolean,
     color: Color,
     modifier: Modifier = Modifier,
-    motionProgress: Float = 0.5f,
-    alphaFraction: Float = 1f
+    motionProgress: () -> Float = { 0.5f },
+    alphaFraction: () -> Float = { 1f }
 ) {
     androidx.compose.foundation.Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
         val cx = w / 2f
+
+        // Read in the draw phase, not in composition. Passing plain Floats here
+        // invalidated this Canvas' inputs every animation frame, so the whole
+        // transfer glyph (including the ring progress behind it) recomposed at
+        // the display refresh rate for a 1.4s loop.
+        val progress = motionProgress()
 
         val strokeWidth = 1.8.dp.toPx()
         val arrowHeadWidth = 3.5.dp.toPx()
@@ -732,12 +750,12 @@ private fun CustomPremiumTransferIcon(
 
         val startY = if (isUpload) h * 0.95f else -h * 0.15f
         val endY = if (isUpload) -h * 0.15f else h * 0.95f
-        val currentCenterY = startY + (endY - startY) * motionProgress
+        val currentCenterY = startY + (endY - startY) * progress
 
         val tipY = if (isUpload) currentCenterY - shaftLength / 2f else currentCenterY + shaftLength / 2f
         val tailY = if (isUpload) currentCenterY + shaftLength / 2f else currentCenterY - shaftLength / 2f
 
-        val drawAlpha = alphaFraction.coerceIn(0f, 1f)
+        val drawAlpha = alphaFraction().coerceIn(0f, 1f)
         val drawColor = color.copy(alpha = drawAlpha)
 
         // 1. Main Arrow Shaft
@@ -782,7 +800,7 @@ private fun DownloadUploadCollapsedRight(
     val textCombined = remember(notification) {
         "${notification?.title} ${notification?.text}".lowercase()
     }
-    val uploadKeywords = listOf("upload", "uploading", "sending", "posting", "exporting", "backing up", "backup")
+    val uploadKeywords = remember { listOf("upload", "uploading", "sending", "posting", "exporting", "backing up", "backup") }
     val isUpload = remember(textCombined) { uploadKeywords.any { textCombined.contains(it) } }
     val accentColor = Color(settings.transferColor)
 
@@ -796,7 +814,9 @@ private fun DownloadUploadCollapsedRight(
 
     val infiniteTransition = rememberInfiniteTransition(label = "downloadUploadAnim")
 
-    val motionFraction by infiniteTransition.animateFloat(
+    // State, not a by-delegate Float: read in the draw phase by
+    // CustomPremiumTransferIcon so the 1.4s loop does not recompose this glyph.
+    val motionFraction = infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
@@ -805,12 +825,6 @@ private fun DownloadUploadCollapsedRight(
         ),
         label = "arrowFlow"
     )
-
-    val arrowAlpha = when {
-        motionFraction < 0.2f -> motionFraction / 0.2f
-        motionFraction > 0.8f -> (1f - motionFraction) / 0.2f
-        else -> 1f
-    }.coerceIn(0f, 1f)
 
     Box(
         modifier = Modifier.size(22.dp),
@@ -832,8 +846,17 @@ private fun DownloadUploadCollapsedRight(
             CustomPremiumTransferIcon(
                 isUpload = isUpload,
                 color = accentColor,
-                motionProgress = motionFraction,
-                alphaFraction = arrowAlpha,
+                motionProgress = { motionFraction.value },
+                alphaFraction = {
+                    // Fade in over the first 20% and out over the last 20%,
+                    // matching the original constant-mapped formula.
+                    val m = motionFraction.value
+                    when {
+                        m < 0.2f -> m / 0.2f
+                        m > 0.8f -> (1f - m) / 0.2f
+                        else -> 1f
+                    }.coerceIn(0f, 1f)
+                },
                 modifier = Modifier.size(14.dp)
             )
         }
@@ -1062,7 +1085,7 @@ fun BluetoothCollapsedRight(
         notification?.let { notif ->
             if (notif.progress in 1..100 && notif.progressMax == 100) notif.progress
             else {
-                val match = Regex("""(\d{1,3})%""").find(notif.text)
+                val match = COLLAPSED_PERCENT_PATTERN.find(notif.text)
                 match?.groupValues?.get(1)?.toIntOrNull()?.coerceIn(0, 100)
             }
         }
@@ -1146,3 +1169,10 @@ fun BluetoothCollapsedRight(
 private val COLLAPSED_TRANSLATION_MAX_DP = 32.dp
 private const val LEFT_SLOT_PADDING_START_DP = 8
 private const val RIGHT_SLOT_PADDING_END_DP = 12
+
+/** Hoisted: these were compiled inside composable bodies on every recomposition. */
+private val COLLAPSED_LIVE_ACTIVITY_MINS = java.util.regex.Pattern
+    .compile("(\\d+)\\s*(?:mins?|minutes?|min|m)\\b", java.util.regex.Pattern.CASE_INSENSITIVE)
+private val COLLAPSED_NAV_DISTANCE = java.util.regex.Pattern
+    .compile("(\\d+(?:\\.\\d+)?)\\s*(?:m|km|ft|mi|miles?|meters?)\\b", java.util.regex.Pattern.CASE_INSENSITIVE)
+private val COLLAPSED_PERCENT_PATTERN = Regex("""(\d{1,3})%""")

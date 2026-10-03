@@ -53,6 +53,14 @@ object TimerStopwatchParser {
 
     private val TIME_PATTERN = Pattern.compile("\\b(?:(\\d{1,2}):)?(\\d{1,2}):(\\d{2})(?:\\.(\\d{1,2}))?\\b")
 
+    // Hoisted: these three were compiled on every parseTimeStringToSeconds()
+    // call that missed TIME_PATTERN. That function runs for every timer and
+    // stopwatch notification the listener classifies, and also from the timer
+    // composables on their 500ms tick.
+    private val HOURS_PATTERN = Pattern.compile("(\\d+)\\s*(?:h|hr|hrs|hours?)\\b", Pattern.CASE_INSENSITIVE)
+    private val MINUTES_PATTERN = Pattern.compile("(\\d+)\\s*(?:m|min|mins|minutes?)\\b", Pattern.CASE_INSENSITIVE)
+    private val SECONDS_PATTERN = Pattern.compile("(\\d+)\\s*(?:s|sec|secs|seconds?)\\b", Pattern.CASE_INSENSITIVE)
+
     fun extractFullText(notification: Notification): String {
         val extras = notification.extras ?: return ""
         val title = runCatching { extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() }.getOrNull().orEmpty()
@@ -398,9 +406,9 @@ object TimerStopwatchParser {
             if (totalSeconds >= 0) return totalSeconds
         }
 
-        val hrMatcher = Pattern.compile("(\\d+)\\s*(?:h|hr|hrs|hours?)\\b", Pattern.CASE_INSENSITIVE).matcher(input)
-        val minMatcher = Pattern.compile("(\\d+)\\s*(?:m|min|mins|minutes?)\\b", Pattern.CASE_INSENSITIVE).matcher(input)
-        val secMatcher = Pattern.compile("(\\d+)\\s*(?:s|sec|secs|seconds?)\\b", Pattern.CASE_INSENSITIVE).matcher(input)
+        val hrMatcher = HOURS_PATTERN.matcher(input)
+        val minMatcher = MINUTES_PATTERN.matcher(input)
+        val secMatcher = SECONDS_PATTERN.matcher(input)
         val hrs = if (hrMatcher.find()) hrMatcher.group(1)?.toLongOrNull() ?: 0L else 0L
         val mins = if (minMatcher.find()) minMatcher.group(1)?.toLongOrNull() ?: 0L else 0L
         val secs = if (secMatcher.find()) secMatcher.group(1)?.toLongOrNull() ?: 0L else 0L

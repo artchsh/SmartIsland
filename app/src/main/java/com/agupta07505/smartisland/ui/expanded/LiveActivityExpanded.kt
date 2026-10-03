@@ -72,7 +72,7 @@ fun LiveActivityExpanded(
             Tuple4("Active", 0.65f, "Live Tracking", "Tracking in real-time")
         } else {
             val text = "${notification.title} ${notification.text}"
-            val matcher = java.util.regex.Pattern.compile("(\\d+)\\s*(?:mins?|minutes?|min|m)\\b", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(text)
+            val matcher = LIVE_ACTIVITY_MINS.matcher(text)
             val eta = if (matcher.find()) "${matcher.group(1)} min" else "Active"
             val pct = if (notification.progressMax > 0) (notification.progress.toFloat() / notification.progressMax.toFloat()).coerceIn(0.15f, 0.95f) else 0.65f
             val title = if (notification.title.isNotBlank()) notification.title else notification.appName
@@ -303,3 +303,7 @@ fun LiveActivityExpanded(
 }
 
 private data class Tuple4<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
+
+/** Hoisted: was compiled inside the composable body on every recomposition. */
+private val LIVE_ACTIVITY_MINS = java.util.regex.Pattern
+    .compile("(\\d+)\\s*(?:mins?|minutes?|min|m)\\b", java.util.regex.Pattern.CASE_INSENSITIVE)

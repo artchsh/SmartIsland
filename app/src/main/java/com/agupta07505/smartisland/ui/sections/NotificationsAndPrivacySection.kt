@@ -1643,7 +1643,7 @@ private fun PrivacySegmentButton(
             .clip(RoundedCornerShape(8.dp))
             .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
             .border(0.5.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
-            .bounceClick(onClick)
+            .bounceClick(onClick = onClick)
             .padding(vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {

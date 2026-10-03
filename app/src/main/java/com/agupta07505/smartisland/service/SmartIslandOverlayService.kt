@@ -41,7 +41,7 @@ import com.agupta07505.smartisland.data.SmartIslandSettings
 import com.agupta07505.smartisland.data.SmartIslandSettingsRepository
 import com.agupta07505.smartisland.model.IslandNotification
 import com.agupta07505.smartisland.ui.IslandViewModel
-import com.agupta07505.smartisland.ui.OverlayIsland
+import com.agupta07505.smartisland.ui.ThemedOverlayIsland
 import com.agupta07505.smartisland.ui.expanded.sendIntentWithOptions
 import com.agupta07505.smartisland.util.runCatchingLogged
 import com.agupta07505.smartisland.util.runSuspendCatchingLogged
@@ -455,7 +455,7 @@ class SmartIslandOverlayService : AccessibilityService() {
                 setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
                 setContent {
                     val fullWidth by isTouchableRegionSupported.collectAsState()
-                    OverlayIsland(
+                    ThemedOverlayIsland(
                         viewModel = this@SmartIslandOverlayService.viewModel,
                         statusBarHeight = statusBarHeight,
                         onOpenNotification = { notification -> openNotification(notification) },

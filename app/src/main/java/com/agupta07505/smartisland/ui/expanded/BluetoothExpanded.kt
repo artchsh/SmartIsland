@@ -72,7 +72,7 @@ fun BluetoothExpanded(
         notification?.let { notif ->
             if (notif.progress in 1..100 && notif.progressMax == 100) notif.progress
             else {
-                val match = Regex("""(\d{1,3})%""").find(notif.text)
+                val match = BLUETOOTH_PERCENT_PATTERN.find(notif.text)
                 match?.groupValues?.get(1)?.toIntOrNull()?.coerceIn(0, 100)
             }
         }
@@ -249,3 +249,6 @@ fun BluetoothExpanded(
         }
     }
 }
+
+/** Hoisted: was compiled inside the composable body on every recomposition. */
+private val BLUETOOTH_PERCENT_PATTERN = Regex("""(\d{1,3})%""")

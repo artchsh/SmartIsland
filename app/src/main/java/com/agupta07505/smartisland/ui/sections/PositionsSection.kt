@@ -814,7 +814,7 @@ private fun PresetChipItem(
             .clip(RoundedCornerShape(12.dp))
             .background(bgColor)
             .border(if (isSelected) 1.5.dp else 0.5.dp, borderColor, RoundedCornerShape(12.dp))
-            .bounceClick(onClick)
+            .bounceClick(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp)
     ) {
         Row(

@@ -292,40 +292,51 @@ object OemDeviceRules {
     fun getAutostartIntents(context: Context, device: OemDeviceType = detectCurrentDevice()): List<Intent> {
         val intents = mutableListOf<Intent>()
 
+        // These use `apply { component = ... }` rather than the chained
+        // `Intent().setComponent(...)` form. Intent.setComponent() returns
+        // `Intent` for chaining, so a caller that stores that return value
+        // stores null instead of an intent. safeStartActivity() then
+        // dereferences it to build its log message, throws, and
+        // openAutostartSettings() catches that and reports failure for the
+        // whole device. The property-setter form has no such failure mode.
         when (device) {
             OemDeviceType.XIAOMI_REDMI_POCO -> {
-                intents.add(Intent().setComponent(ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity")))
-                intents.add(Intent().setComponent(ComponentName("com.miui.securitycenter", "com.miui.powerkeeper.ui.HiddenAppsConfigActivity")))
+                intents.add(Intent().apply { component = ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity") })
+                intents.add(Intent().apply { component = ComponentName("com.miui.securitycenter", "com.miui.powerkeeper.ui.HiddenAppsConfigActivity") })
             }
             OemDeviceType.REALME_OPPO_ONEPLUS -> {
-                intents.add(Intent().setComponent(ComponentName("com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity")))
-                intents.add(Intent().setComponent(ComponentName("com.coloros.safecenter", "com.coloros.safecenter.startupapp.StartupAppListActivity")))
-                intents.add(Intent().setComponent(ComponentName("com.oppo.safe", "com.oppo.safe.permission.startup.StartupAppListActivity")))
-                intents.add(Intent().setComponent(ComponentName("com.oplus.securitypermission", "com.oplus.securitypermission.startup.StartupAppListActivity")))
+                intents.add(Intent().apply { component = ComponentName("com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity") })
+                intents.add(Intent().apply { component = ComponentName("com.coloros.safecenter", "com.coloros.safecenter.startupapp.StartupAppListActivity") })
+                intents.add(Intent().apply { component = ComponentName("com.oppo.safe", "com.oppo.safe.permission.startup.StartupAppListActivity") })
+                intents.add(Intent().apply { component = ComponentName("com.oplus.securitypermission", "com.oplus.securitypermission.startup.StartupAppListActivity") })
             }
             OemDeviceType.VIVO_IQOO -> {
-                intents.add(Intent().setComponent(ComponentName("com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.AddWhiteListActivity")))
-                intents.add(Intent().setComponent(ComponentName("com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity")))
-                intents.add(Intent().setComponent(ComponentName("com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.BgStartUpManager")))
+                intents.add(Intent().apply { component = ComponentName("com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.AddWhiteListActivity") })
+                intents.add(Intent().apply { component = ComponentName("com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity") })
+                intents.add(Intent().apply { component = ComponentName("com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.BgStartUpManager") })
             }
             OemDeviceType.SAMSUNG -> {
-                intents.add(Intent().setComponent(ComponentName("com.samsung.android.looper", "com.samsung.android.sm.ui.battery.BatteryActivity")))
-                intents.add(Intent().setComponent(ComponentName("com.samsung.android.sm_cn", "com.samsung.android.sm.ui.ram.AutoRunActivity")))
-                intents.add(Intent().setComponent(ComponentName("com.samsung.android.sm", "com.samsung.android.sm.ui.dashboard.SmartManagerDashBoardActivity")))
+                intents.add(Intent().apply { component = ComponentName("com.samsung.android.looper", "com.samsung.android.sm.ui.battery.BatteryActivity") })
+                intents.add(Intent().apply { component = ComponentName("com.samsung.android.sm_cn", "com.samsung.android.sm.ui.ram.AutoRunActivity") })
+                intents.add(Intent().apply { component = ComponentName("com.samsung.android.sm", "com.samsung.android.sm.ui.dashboard.SmartManagerDashBoardActivity") })
             }
             OemDeviceType.HUAWEI_HONOR -> {
-                intents.add(Intent().setComponent(ComponentName("com.huawei.systemmanager", "com.huawei.systemmanager.appcontrol.activity.StartupAppControlActivity")))
-                intents.add(Intent().setComponent(ComponentName("com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity")))
+                intents.add(Intent().apply { component = ComponentName("com.huawei.systemmanager", "com.huawei.systemmanager.appcontrol.activity.StartupAppControlActivity") })
+                intents.add(Intent().apply { component = ComponentName("com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity") })
             }
             OemDeviceType.MOTOROLA -> {
-                intents.add(Intent().setComponent(ComponentName("com.asus.mobilemanager", "com.asus.mobilemanager.autostart.AutoStartActivity")))
+                // Motorola ships no dedicated autostart/background-app screen.
+                // This previously pointed at an ASUS component
+                // (com.asus.mobilemanager...AutoStartActivity), which cannot
+                // resolve on a Motorola device and sent users nowhere.
+                // Fall through to the generic App Info intent below instead.
             }
             OemDeviceType.NUBIA -> {
-                intents.add(Intent().setComponent(ComponentName("cn.nubia.security2", "cn.nubia.security.permission.activity.AccessControlActivity")))
-                intents.add(Intent().setComponent(ComponentName("cn.nubia.security2", "cn.nubia.security.power.ui.PowerControlActivity")))
-                intents.add(Intent().setComponent(ComponentName("cn.nubia.neosafe", "cn.nubia.neosafe.permission.StartupManagerActivity")))
-                intents.add(Intent().setComponent(ComponentName("cn.nubia.neosafe", "cn.nubia.neosafe.permission.AutoStartPermissionActivity")))
-                intents.add(Intent().setComponent(ComponentName("com.zte.heartyservice", "com.zte.heartyservice.autorun.AppAutoRunManager")))
+                intents.add(Intent().apply { component = ComponentName("cn.nubia.security2", "cn.nubia.security.permission.activity.AccessControlActivity") })
+                intents.add(Intent().apply { component = ComponentName("cn.nubia.security2", "cn.nubia.security.power.ui.PowerControlActivity") })
+                intents.add(Intent().apply { component = ComponentName("cn.nubia.neosafe", "cn.nubia.neosafe.permission.StartupManagerActivity") })
+                intents.add(Intent().apply { component = ComponentName("cn.nubia.neosafe", "cn.nubia.neosafe.permission.AutoStartPermissionActivity") })
+                intents.add(Intent().apply { component = ComponentName("com.zte.heartyservice", "com.zte.heartyservice.autorun.AppAutoRunManager") })
             }
             else -> {
                 // Generic fallback
@@ -341,6 +352,8 @@ object OemDeviceRules {
             )
         } catch (_: Throwable) { }
 
-        return intents
+        // Belt and braces: never hand a null back. One null entry aborts the
+        // entire ladder because safeStartActivity() dereferences the intent.
+        return intents.filterNotNull()
     }
 }

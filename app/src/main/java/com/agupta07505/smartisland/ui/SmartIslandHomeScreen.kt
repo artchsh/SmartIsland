@@ -738,7 +738,7 @@ private fun ModeChipButton(
                 color = if (isSelected) iconTint.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
                 shape = RoundedCornerShape(10.dp)
             )
-            .bounceClick(onClick)
+            .bounceClick(onClick = onClick)
             .padding(horizontal = 6.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -903,7 +903,7 @@ private fun FeatureStudioNavigationCard(
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(MaterialTheme.colorScheme.surface)
-            .bounceClick(onClick)
+            .bounceClick(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

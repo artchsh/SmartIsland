@@ -70,7 +70,7 @@ fun NavigationExpanded(
             val text = notification.text
             val combined = "$title $text".lowercase()
 
-            val pattern = java.util.regex.Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*(?:m|km|ft|mi|miles?|meters?)\\b", java.util.regex.Pattern.CASE_INSENSITIVE)
+            val pattern = NAV_DISTANCE
             val matcher = pattern.matcher(combined)
             val dist = if (matcher.find()) "In ${matcher.group(0)}" else "In 200 m"
             val turnDir = NavigationParser.parseTurnDirection(combined)
@@ -294,3 +294,7 @@ fun NavigationExpanded(
 }
 
 private data class Tuple3<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
+
+/** Hoisted: was compiled inside the composable body on every recomposition. */
+private val NAV_DISTANCE = java.util.regex.Pattern
+    .compile("(\\d+(?:\\.\\d+)?)\\s*(?:m|km|ft|mi|miles?|meters?)\\b", java.util.regex.Pattern.CASE_INSENSITIVE)

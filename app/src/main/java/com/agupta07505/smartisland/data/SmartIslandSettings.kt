@@ -37,7 +37,7 @@ data class SmartIslandSettings(
     val showRecentApps: Boolean = false,
     val welcomeDialogShown: Boolean = false,
     val showOnLockScreen: Boolean = false,
-    val lockScreenPrivacy: String = "AppIconOnly",
+    val lockScreenPrivacy: String = LOCK_SCREEN_APP_ICON_ONLY,
     val showNotificationActions: Boolean = true,
     val hideFromNotificationShade: Boolean = true,
     val liveActivitiesEnabled: Boolean = true,
@@ -187,6 +187,17 @@ data class SmartIslandSettings(
         const val CIRCLE_POSITION_RIGHT = "right"
         const val CIRCLE_POSITION_LEFT = "left"
 
+        /**
+         * Lock screen privacy modes.
+         *
+         * These were bare string literals in at least four files, and the
+         * authoritative validation set lived in a private companion inside
+         * SmartIslandSettingsRepository. A typo in the UI therefore silently
+         * disabled redaction rather than failing.
+         */
+        const val LOCK_SCREEN_APP_ICON_ONLY = "AppIconOnly"
+        const val LOCK_SCREEN_FULL_CONTENT = "FullContent"
+
         val Default = SmartIslandSettings()
 
         const val BACKUP_FORMAT_VERSION = 1
@@ -280,7 +291,7 @@ data class SmartIslandSettings(
                 welcomeDialogShown = obj.optBoolean("welcomeDialogShown", defaults.welcomeDialogShown),
                 showOnLockScreen = obj.optBoolean("showOnLockScreen", defaults.showOnLockScreen),
                 lockScreenPrivacy = obj.optString("lockScreenPrivacy", defaults.lockScreenPrivacy).let {
-                    if (it == "AppIconOnly" || it == "FullContent") it else defaults.lockScreenPrivacy
+                    if (it == LOCK_SCREEN_APP_ICON_ONLY || it == LOCK_SCREEN_FULL_CONTENT) it else defaults.lockScreenPrivacy
                 },
                 showNotificationActions = obj.optBoolean("showNotificationActions", defaults.showNotificationActions),
                 hideFromNotificationShade = obj.optBoolean("hideFromNotificationShade", defaults.hideFromNotificationShade),

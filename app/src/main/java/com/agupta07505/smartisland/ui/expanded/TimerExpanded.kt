@@ -203,9 +203,9 @@ fun TimerExpanded(
                 } else {
                     val notifTitle = notification?.title.orEmpty()
                     val notifText = notification?.text.orEmpty()
-                    if (notifTitle.isNotBlank() && !notifTitle.equals("Timer", ignoreCase = true) && !notifTitle.matches(Regex("""^[\d:.]+$"""))) {
+                    if (notifTitle.isNotBlank() && !notifTitle.equals("Timer", ignoreCase = true) && !TIMER_NUMERIC_ONLY.matches(notifTitle)) {
                         notifTitle
-                    } else if (notifText.isNotBlank() && !notifText.equals("Timer", ignoreCase = true) && !notifText.matches(Regex("""^[\d:.]+$"""))) {
+                    } else if (notifText.isNotBlank() && !notifText.equals("Timer", ignoreCase = true) && !TIMER_NUMERIC_ONLY.matches(notifText)) {
                         notifText
                     } else {
                         "Timer Active"
@@ -319,3 +319,12 @@ fun TimerExpanded(
         }
     }
 }
+
+/**
+ * Matches a bare clock-style value such as "12:30" or "1:02:03.4".
+ *
+ * Hoisted to a top-level val: this was previously constructed inline with
+ * Regex("""^[\d:.]+$""") on both branches, so a Pattern was compiled twice on
+ * every recomposition of a composable that re-runs its 500ms ticker.
+ */
+private val TIMER_NUMERIC_ONLY = Regex("""^[\d:.]+$""")

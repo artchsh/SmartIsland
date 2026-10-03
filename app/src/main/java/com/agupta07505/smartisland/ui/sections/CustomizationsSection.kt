@@ -404,7 +404,7 @@ internal fun ColorPresetRow(
                     if (isCustom) Modifier.background(Color(selectedColor))
                     else Modifier.background(rainbowBrush)
                 )
-                .bounceClick(onCustomClicked),
+                .bounceClick(onClick = onCustomClicked),
             contentAlignment = Alignment.Center
         ) {
             if (isCustom) {

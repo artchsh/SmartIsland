@@ -83,8 +83,8 @@ fun DownloadExpanded(
     // Strip out duplicate percentage text from subtitle so percentage is displayed ONCE on the right side
     val cleanSubtitle = remember(notification.text) {
         notification.text
-            .replace(Regex("""\s*[•·-]?\s*\d+%\s*"""), "")
-            .replace(Regex("""\s*\d+%\s*[•·-]?\s*"""), "")
+            .replace(TRANSFER_TRAILING_PERCENT, "")
+            .replace(TRANSFER_PERCENT_GLYPH, "")
             .trim()
             .ifBlank { if (isUpload) "Uploading..." else "Downloading..." }
     }
@@ -328,3 +328,7 @@ private fun CustomBadgeTransferIcon(
         )
     }
 }
+
+/** Hoisted: these were compiled inside the composable body on every recomposition. */
+private val TRANSFER_TRAILING_PERCENT = Regex("""\s*[•·-]?\s*\d+%\s*""")
+private val TRANSFER_PERCENT_GLYPH = Regex("""\s*\d+%\s*[•·-]?\s*""")
