@@ -1,8 +1,41 @@
 # Changelog
 
-All notable changes to Smart Island should be documented in this file.
+All notable changes to Dot Island should be documented in this file. Entries below
+this point predate the rebrand and refer to the project under its former name,
+Smart Island, and its former package, `com.agupta07505.smartisland`.
 
 The format is inspired by Keep a Changelog, and this project uses the GNU General Public License v3.0.
+
+## [0.0.2] - 2026-10-04
+
+Package renamed to `dev.qarasky.dotisland`. Version line restarted for the new
+identity and the private, single-device build.
+
+- **Public publishing API:** other apps can put an activity in the island via
+  `PUBLISH` / `UPDATE` / `DISMISS` / `DISMISS_ALL` broadcasts, with an optional
+  `DotIslandPublisher` Kotlin wrapper. Caller identity is read from
+  `Binder.getCallingUid()` and checked against a user-managed allowlist, so a
+  publisher cannot forge another app's namespace, label or icon.
+  `com.android.shell` is allowed by default for adb/Termux. Published activities
+  persist across process death and expire on their own (default 30 min).
+  See `docs/PUBLISHING_API.md`.
+- **Package identity:** `com.agupta07505.smartisland` → `dev.qarasky.dotisland`.
+- `versionCode` 2, `versionName` 0.0.2.
+
+## [0.0.1] - 2026-10-04
+
+Personal rebuild and rebrand.
+
+- **Rebrand:** Dot Island, `minSdk 36`.
+- **Single control screen:** enable switch, live pill preview, three source rows and
+  contextual permission repair. All settings tabs and editors removed; only the
+  enable flag is persisted.
+- **Three activities only:** Spotify media sessions, native calls, Dodo order tracking.
+- **Read-only ingestion:** no longer cancels system notifications or replays their
+  sounds. History database, shortcuts/recent apps, backup/export, update feeds,
+  networking, Shizuku, OEM helpers and unused island modes removed.
+- **New icon:** white pill on black, vector adaptive icon with a monochrome layer.
+- Retained: camera-safe geometry, high-refresh motion work, service recovery.
 
 ## [7.0.0] - 2026-09-20
 

@@ -203,11 +203,12 @@ The touch model and the morph want opposite things:
 | Pill-sized | Native, via `FLAG_NOT_TOUCH_MODAL` | Window jumps to full-screen on expand |
 | Full-screen | Blocked; needs a carved touch region | Smooth in-Compose morph |
 
-A carved touch region requires the hidden `OnComputeInternalInsetsListener` API,
-which AUDIT §4.1 removed because it is blocked on Android 14+ and is a Play policy
-violation. That fix must not be undone.
+A carved touch region does not necessarily require hidden APIs: Android 13+
+provides `AttachedSurfaceControl.setTouchableRegion`. The old reflection-based
+implementation remains removed; the current implementation uses small collapsed
+window bounds and public `FLAG_NOT_TOUCH_MODAL` instead.
 
-### 4.3 Resolution — animate the window bounds
+### 4.3 Original proposal — animate the window bounds (not implemented)
 
 The expanded card is only ~421 × 160 dp. It never needed to be full-screen *during*
 the transition. So:
@@ -222,9 +223,11 @@ the transition. So:
 4. **Collapsing** — the window stays `MATCH_PARENT` for the duration of the collapse
    animation, then snaps back to pill-sized.
 
-Step 4 is already how the code behaves today via the 220 ms
-`AUTO_COLLAPSE_DELAY_MS` in `SmartIslandOverlayService`; that trick is being reused
-for step 2.
+The original 220 ms collapse timeout was shorter than the content fade and was
+not reliable under frame delays or animation-duration scaling. It has been
+replaced with actual Compose transition completion. Per-frame window resizing
+is deferred: it would add repeated system relayout to the coordinate handoff.
+See `docs/TRANSITION_INVESTIGATION.md` for the implemented alternative and research.
 
 ---
 
@@ -241,10 +244,11 @@ out — a bounce on collapse reads as wrong.
 | Expanding | 0.86 | 520 | small overshoot |
 | Collapsing | **1.0** (critically damped) | 780 | no overshoot, settles ~200 ms |
 
-This is also load-bearing for correctness, not just feel. The overlay window stays
-`MATCH_PARENT` for `AUTO_COLLAPSE_DELAY_MS` (220 ms) after `expanded` flips, and
-only then shrinks to pill size. If the content animation outlasted the window, the
-content would be laid out against a shrinking box and visibly jump.
+The expanded window now remains large until the transition is actually idle.
+Expansion waits for enlarged window layout before starting the morph. Springs
+use screen-space targets, converted to actual window-local coordinates in layers;
+resizing no longer deliberately changes those targets. Android's independent
+window-move animation is disabled on API 34+.
 
 ### Phase A — geometry and window-bounds morph
 - `computeExpandedCardGeometry(...)` — pure, unit-tested, equal top/side inset
@@ -257,9 +261,9 @@ content would be laid out against a shrinking box and visibly jump.
 **Status: partly done.** The *inset* half is complete — `calculateExpandedWidth`
 now subtracts a fixed margin instead of scaling by 95%, and
 `calculateExpandedTopOffset` returns that same margin, which removed the 30dp
-downward jump. The *window-bounds animation* half is not started: the window still
-jumps straight to `MATCH_PARENT` on expand. That is the remaining piece of the
-morph.
+downward jump. Per-frame *window-bounds animation* is not implemented. Instead,
+the handoff now prepares `MATCH_PARENT` bounds before the Compose morph and
+shrinks after completion. Smoothness is not yet established across all modes.
 
 ### Phase B — one continuous shape
 - Single rounded-rect whose bounds and corner radius interpolate

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Smart Island (2026)
+  Dot Island (2026)
   © Animesh Gupta — github.com/agupta07505
   Licensed under the GNU GPL v3 License
   Do not remove or alter this notice. - Per GPL-3.0 Section 4 & Section 5
@@ -8,21 +8,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission
         android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
         tools:ignore="ProtectedPermissions" />
-    <uses-permission
-        android:name="android.permission.PACKAGE_USAGE_STATS"
-        tools:ignore="ProtectedPermissions" />
-    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.VIBRATE" />
-    <uses-permission android:name="android.permission.BLUETOOTH" />
-    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
     <queries>
         <intent>
@@ -32,7 +24,7 @@
     </queries>
 
     <application
-        android:name=".SmartIslandApp"
+        android:name=".DotIslandApp"
         android:allowBackup="false"
         android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -41,13 +33,12 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:enableOnBackInvokedCallback="true"
-        android:localeConfig="@xml/locales_config"
-        android:theme="@style/Theme.SmartIsland">
+        android:theme="@style/Theme.DotIsland">
 
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:theme="@style/Theme.SmartIsland">
+            android:theme="@style/Theme.DotIsland">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -55,7 +46,7 @@
         </activity>
 
         <service
-            android:name=".service.SmartIslandOverlayService"
+            android:name=".service.DotIslandOverlayService"
             android:exported="true"
             android:label="@string/accessibility_service_label"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
@@ -73,7 +64,7 @@
         </service>
 
         <service
-            android:name=".service.SmartIslandNotificationListenerService"
+            android:name=".service.DotIslandNotificationListenerService"
             android:exported="true"
             android:label="@string/app_name"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
@@ -81,6 +72,32 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+        <!--
+          Public publishing API. Intentionally exported WITHOUT a manifest
+          permission, which is what ExportedReceiver asks for. A custom permission
+          would lock out `adb shell` and Termux — the primary publishers for a
+          personal build — because neither holds a signature permission we could
+          grant them.
+
+          Safety does not depend on a permission: DotIslandPublishReceiver reads
+          Binder.getCallingUid(), which the kernel supplies and a sender cannot
+          forge, resolves the real package(s) behind that UID, and rejects anything
+          absent from the user-managed allowlist in the Dot Island app. A malicious
+          app therefore cannot publish, and cannot impersonate another package's
+          namespace, label or icon. Guardrail only: an allowlisted publisher's
+          content does reach the overlay, which is the point of the feature.
+        -->
+        <receiver
+            android:name=".service.DotIslandPublishReceiver"
+            android:exported="true"
+            tools:ignore="ExportedReceiver">
+            <intent-filter>
+                <action android:name="dev.qarasky.dotisland.action.PUBLISH" />
+                <action android:name="dev.qarasky.dotisland.action.UPDATE" />
+                <action android:name="dev.qarasky.dotisland.action.DISMISS" />
+                <action android:name="dev.qarasky.dotisland.action.DISMISS_ALL" />
+            </intent-filter>
+        </receiver>
         <receiver
             android:name=".receiver.AutostartReceiver"
             android:exported="true">
@@ -92,12 +109,5 @@
             </intent-filter>
         </receiver>
 
-        <provider
-            android:name="rikka.shizuku.ShizukuProvider"
-            android:authorities="${applicationId}.shizuku"
-            android:multiprocess="false"
-            android:enabled="true"
-            android:exported="true"
-            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
     </application>
 </manifest>

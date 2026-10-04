@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Dot Island (2026)
+  © Animesh Gupta — github.com/agupta07505
+  Licensed under the GNU GPL v3 License
+  Do not remove or alter this notice. - Per GPL-3.0 Section 4 & Section 5
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24"
+    android:tint="#FFFFFF">
+    <path android:fillColor="@android:color/white"
+        android:pathData="M6,9h12a3,3 0 0 1 0,6H6a3,3 0 0 1 0,-6z" />
+</vector>

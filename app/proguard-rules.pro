@@ -1,7 +1,7 @@
-# Smart Island Proguard Rules
+# Dot Island Proguard Rules
 #
 # Scope note: this file intentionally contains ONLY rules for members that
-# Smart Island reaches via reflection, plus the library consumer rules that
+# Dot Island reaches via reflection, plus the library consumer rules that
 # AndroidX ships itself.
 #
 # The two blanket rules that used to live here were removed:
@@ -24,7 +24,7 @@
 # NOTE: the keeps for ViewTreeObserver$OnComputeInternalInsetsListener,
 # ViewTreeObserver.addOnComputeInternalInsetsListener and
 # View$InternalInsetsInfo have been REMOVED. They existed only for the
-# touchable-region reflection in SmartIslandOverlayService, which has been
+# touchable-region reflection in DotIslandOverlayService, which has been
 # deleted. Touch pass-through now uses the public FLAG_NOT_TOUCH_MODAL.
 # See AUDIT.md section 4.1.
 

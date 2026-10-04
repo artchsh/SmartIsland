@@ -1,5 +1,5 @@
 /*
- * Smart Island (2026)
+ * Dot Island (2026)
  * © Animesh Gupta — github.com/agupta07505
  * Licensed under the GNU GPL v3 License
  * Do not remove or alter this notice. - Per GPL-3.0 Section 4 & Section 5
@@ -23,15 +23,18 @@ val hasReleaseSigning = signingStoreFile.isPresent &&
     signingKeyPassword.isPresent
 
 android {
-    namespace = "com.agupta07505.smartisland"
+    namespace = "dev.qarasky.dotisland"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.agupta07505.smartisland"
-        minSdk = 26
+        applicationId = "dev.qarasky.dotisland"
+        minSdk = 36
         targetSdk = 36
-        versionCode = 8
-        versionName = "7.0.0"
+        // New package identity (dev.qarasky.dotisland) and a private build, so the
+        // version line restarts here rather than continuing Smart Island 7.x/8.x.
+        versionCode = 2
+        versionName = "0.0.2"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildFeatures {
@@ -131,10 +134,6 @@ dependencies {
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("com.google.dagger:hilt-android:2.60.1")
     kapt("com.google.dagger:hilt-compiler:2.60.1")
-
-    // Rikka Shizuku API
-    implementation("dev.rikka.shizuku:api:13.1.5")
-    implementation("dev.rikka.shizuku:provider:13.1.5")
 
     debugImplementation(composeBom)
     debugImplementation("androidx.compose.ui:ui-tooling")
