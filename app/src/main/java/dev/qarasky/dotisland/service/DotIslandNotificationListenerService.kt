@@ -26,6 +26,9 @@ import dev.qarasky.dotisland.model.IslandMode
 import dev.qarasky.dotisland.model.IslandNotification
 import dev.qarasky.dotisland.model.IslandNotificationAction
 import dev.qarasky.dotisland.util.PersonalActivityPolicy
+import dev.qarasky.dotisland.util.bestSpotifyStateIndex
+import dev.qarasky.dotisland.util.isSpotifyDeadState
+import dev.qarasky.dotisland.util.isSpotifyPlayingState
 import dev.qarasky.dotisland.util.runCatchingLogged
 import dev.qarasky.dotisland.util.runSuspendCatchingLogged
 import dagger.hilt.android.AndroidEntryPoint
@@ -53,11 +56,13 @@ class DotIslandNotificationListenerService : NotificationListenerService() {
         override fun onMetadataChanged(metadata: MediaMetadata?) = publishSpotify()
         override fun onPlaybackStateChanged(state: PlaybackState?) = publishSpotify()
         override fun onSessionDestroyed() {
+            // No immediate removal: the replacement session often appears a beat
+            // later, and publishSpotify's grace delay covers a real death.
             detachController()
-            notificationRepository.removeNotification(SPOTIFY_KEY)
             refreshSessions()
         }
     }
+    private var spotifyRemovalJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -189,12 +194,22 @@ class DotIslandNotificationListenerService : NotificationListenerService() {
     }
     private fun selectSpotify(sessions: List<MediaController>) {
         val matches = sessions.filter { it.packageName == PersonalActivityPolicy.SPOTIFY }
-        val next = matches.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING }
-            ?: matches.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PAUSED }
-        if (controller?.sessionToken != next?.sessionToken) {
+        // Keep the current controller while its session is still alive, whatever
+        // transitional state a track switch puts it in. Only re-pick when it is
+        // genuinely gone, so buffering/skipping never detaches us mid-switch.
+        val current = controller
+        if (current != null && matches.any { it.sessionToken == current.sessionToken }) {
+            publishSpotify()
+            return
+        }
+        val bestIndex = bestSpotifyStateIndex(matches.map { it.playbackState?.state })
+        val best = bestIndex?.let { matches[it] }
+        if (best != null && current?.sessionToken != best.sessionToken) {
             detachController()
-            controller = next
-            next?.registerCallback(mediaCallback, handler)
+            controller = best
+            best.registerCallback(mediaCallback, handler)
+        } else if (best == null) {
+            detachController()
         }
         publishSpotify()
     }
@@ -202,26 +217,46 @@ class DotIslandNotificationListenerService : NotificationListenerService() {
         if (!enabled) return
         val c = controller
         val state = c?.playbackState
-        if (c == null || state == null || state.state in listOf(PlaybackState.STATE_NONE, PlaybackState.STATE_STOPPED, PlaybackState.STATE_ERROR)) {
-            notificationRepository.removeNotification(SPOTIFY_KEY)
+        if (c == null || state == null || isSpotifyDeadState(state.state)) {
+            scheduleSpotifyRemoval()
             return
         }
         val metadata = c.metadata
         val n = spotifyNotification?.notification
         val title = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: n?.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()
-        if (title.isNullOrBlank()) return
+        // A blank title mid-switch means "not yet", not "gone": keep the old card.
+        if (title.isNullOrBlank()) {
+            spotifyRemovalJob?.cancel()
+            return
+        }
         val artwork = metadata?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
             ?: metadata?.getBitmap(MediaMetadata.METADATA_KEY_ART)
             ?: metadata?.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
+        spotifyRemovalJob?.cancel()
         notificationRepository.postNotification(IslandNotification(
             key = SPOTIFY_KEY, packageName = PersonalActivityPolicy.SPOTIFY, appName = "Spotify", title = title,
             text = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: n?.extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty(),
             timeMillis = spotifyNotification?.postTime ?: System.currentTimeMillis(),
-            largeIcon = artwork, mediaToken = c.sessionToken, mediaIsPlaying = state.state == PlaybackState.STATE_PLAYING,
+            largeIcon = artwork, mediaToken = c.sessionToken, mediaIsPlaying = isSpotifyPlayingState(state?.state),
             mediaPositionMs = state.position, mediaDurationMs = metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION),
             mode = IslandMode.Music, contentIntent = n?.contentIntent,
             actionIntents = n?.actions.orEmpty().map { IslandNotificationAction(it.title.toString(), it.actionIntent) }
         ))
+    }
+    /**
+     * Removal grace: track switches (and session handovers) briefly look dead.
+     * Only remove the island if there is still no usable session after the delay;
+     * any successful publish in between cancels the pending removal.
+     */
+    private fun scheduleSpotifyRemoval() {
+        if (spotifyRemovalJob?.isActive == true) return
+        spotifyRemovalJob = scope.launch {
+            delay(SPOTIFY_REMOVAL_GRACE_MS)
+            val state = controller?.playbackState
+            if (isSpotifyDeadState(state?.state)) {
+                notificationRepository.removeNotification(SPOTIFY_KEY)
+            }
+        }
     }
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
         scope.launch {
@@ -252,5 +287,6 @@ class DotIslandNotificationListenerService : NotificationListenerService() {
         private const val TAG = "IslandActivities"
         private const val SPOTIFY_KEY = "spotify_session"
         private const val EXPIRY_POLL_MS = 15_000L
+        private const val SPOTIFY_REMOVAL_GRACE_MS = 2_000L
     }
 }

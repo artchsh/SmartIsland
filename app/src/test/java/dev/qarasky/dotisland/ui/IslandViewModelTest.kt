@@ -29,16 +29,20 @@ class IslandViewModelTest {
         vm.expand()
         assertFalse(vm.expanded.value)
     }
-    @Test fun foregroundSuppressionIsNotIdleAndReturnRestoresMusic() = runTest {
+    @Test fun musicStaysVisibleInsideItsOwnApp() = runTest {
         val repo = DotIslandNotificationRepository()
         val vm = viewModel(repo)
         repo.postNotification(music())
         runCurrent()
         assertEquals(1, vm.visibleNotifications.value.size)
+        // Inside Spotify with music playing: the pill keeps showing music,
+        // never a blank pill that is neither music nor idle.
         vm.foregroundPackage.value = "com.spotify.music"
         runCurrent()
-        assertTrue(vm.visibleNotifications.value.isEmpty())
+        assertEquals(1, vm.visibleNotifications.value.size)
+        assertEquals(IslandMode.Music, vm.mode.value)
         assertTrue(vm.hasSourceActivity.value)
+        // Leaving the app changes nothing about visibility either.
         vm.foregroundPackage.value = "com.nothing.launcher"
         runCurrent()
         assertEquals(1, vm.visibleNotifications.value.size)

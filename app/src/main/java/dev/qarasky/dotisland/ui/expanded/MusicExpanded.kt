@@ -71,6 +71,7 @@ import dev.qarasky.dotisland.ui.DotMatrixActivity
 import androidx.compose.ui.text.font.FontFamily
 import dev.qarasky.dotisland.util.runCatchingLogged
 import dev.qarasky.dotisland.util.calculateCutoutAvoidingTop
+import dev.qarasky.dotisland.util.isSpotifyPlayingState
 import kotlin.math.ceil
 
 /** Black, compact media surface; camera padding is owned by the expanded container. */
@@ -101,7 +102,7 @@ fun MusicExpanded(
         val callback = object : MediaController.Callback() {
             override fun onPlaybackStateChanged(state: PlaybackState?) {
                 playbackState = state
-                isPlaying = state?.state == PlaybackState.STATE_PLAYING
+                isPlaying = isSpotifyPlayingState(state?.state)
             }
             override fun onMetadataChanged(value: MediaMetadata?) {
                 metadata = value
@@ -110,7 +111,7 @@ fun MusicExpanded(
         controller.registerCallback(callback)
         playbackState = controller.playbackState
         metadata = controller.metadata
-        isPlaying = playbackState?.state == PlaybackState.STATE_PLAYING
+        isPlaying = isSpotifyPlayingState(playbackState?.state)
         onDispose { controller.unregisterCallback(callback) }
     }
 

@@ -43,27 +43,26 @@ class IslandViewModel(
     )
 
     val notifications = notificationRepo.notifications
-    // Do not label foreground-suppressed music as idle, or subscribe the overlay
-    // to every source metadata update merely to distinguish these two states.
+    // True idle means no source activity at all. Music is shown everywhere,
+    // including inside its own app, so there is no suppressed-but-active state
+    // to distinguish here.
     val hasSourceActivity = notifications.map { it.isNotEmpty() }.distinctUntilChanged().stateIn(
         scope = viewModelScope,
         started = SharingStarted.Eagerly,
         initialValue = notifications.value.isNotEmpty()
     )
+    // Last foreground package, reported by the overlay service. Currently unused
+    // for filtering; retained so the service has somewhere to report it.
     val foregroundPackage = MutableStateFlow<String?>(null)
 
-    val visibleNotifications: StateFlow<List<IslandNotification>> = combine(
-        notifications,
-        foregroundPackage,
-        settings
-    ) { list, fgPkg, s ->
-        list.filterNot { notif ->
-            !fgPkg.isNullOrEmpty() && notif.mode == IslandMode.Music && notif.packageName == fgPkg
-        }
-    }.stateIn(
+    // The music island stays visible everywhere, including inside Spotify: if
+    // music is playing the pill shows it, otherwise the pill shows idle. An
+    // earlier revision filtered music out while its app was foreground, which
+    // left a blank pill that was neither music nor idle.
+    val visibleNotifications: StateFlow<List<IslandNotification>> = notifications.stateIn(
         scope = viewModelScope,
         started = SharingStarted.Eagerly,
-        initialValue = emptyList()
+        initialValue = notifications.value
     )
 
     val expanded = MutableStateFlow(false)
@@ -96,10 +95,6 @@ class IslandViewModel(
             runSuspendCatchingLogged(TAG, "Auto-expand collector failed") {
                 notificationRepo.autoExpandEvent.collect { key ->
                     val notif = notifications.value.firstOrNull { it.key == key } ?: return@collect
-                    val isFgMusic = notif.mode == IslandMode.Music &&
-                        !foregroundPackage.value.isNullOrEmpty() &&
-                        notif.packageName == foregroundPackage.value
-                    if (isFgMusic) return@collect
 
                     val index = notifications.value.indexOfFirst { it.key == key }
                     if (index >= 0) {
